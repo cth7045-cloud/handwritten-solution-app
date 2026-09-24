@@ -13,6 +13,30 @@ try:
 except ImportError:
     genai = None
 
+MODEL_DISPLAY_NAMES = {
+    "gemini-3.8-flash": "Gemini 3.8 Flash",
+    "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
+    "gemini-3.7-flash": "Gemini 3.7 Flash",
+    "gemini-3.6-flash": "Gemini 3.6 Flash",
+    "gemini-3.5-flash": "Gemini 3.5 Flash",
+    "gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite",
+    "gemini-2.5-pro": "Gemini 2.5 Pro",
+    "gemini-2.5-flash": "Gemini 2.5 Flash",
+    "gemini-2.0-flash": "Gemini 2.0 Flash",
+    "gemini-1.5-pro": "Gemini 1.5 Pro",
+    "gemini-1.5-flash": "Gemini 1.5 Flash",
+}
+
+def format_model_name(raw_name: Optional[str]) -> str:
+    """모델 코드명을 공식 명칭(예: Gemini 3.8 Flash)으로 정확하게 변환합니다."""
+    if not raw_name:
+        return "Gemini 3.8 Flash"
+    cleaned = raw_name.replace("models/", "").strip()
+    for k, v in MODEL_DISPLAY_NAMES.items():
+        if k in cleaned:
+            return v
+    return cleaned
+
 def solve_problem_with_gemini(
     image_bytes: bytes,
     mime_type: str = "image/png",
@@ -72,15 +96,16 @@ def solve_problem_with_gemini(
     "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트"
 }
 """
-        # 기본 우선순위 모델 목록 (최신 3.x 세대 우선)
+        # 기본 우선순위 모델 목록 (최고 성능 플래그십 순서)
         base_priority = [
             "gemini-3.8-flash",
+            "gemini-3.1-pro-preview",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
-            "gemini-2.5-flash",
             "gemini-2.5-pro",
+            "gemini-2.5-flash",
         ]
         
         # 키에 활성화된 모델 목록 동적 조회 시도
@@ -167,7 +192,7 @@ def solve_problem_with_gemini(
             json_str = text_output
             
         result = json.loads(json_str)
-        result["used_model"] = used_model
+        result["used_model"] = format_model_name(used_model)
         return result
 
     except Exception as e:

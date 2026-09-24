@@ -10,7 +10,7 @@ import streamlit as st
 
 from core.handwriting_engine import HandwritingEngine, FONT_MAP, PEN_STYLES
 from core.overlay_composer import OverlayComposer, POSTIT_COLORS
-from core.gemini_solver import solve_problem_with_gemini
+from core.gemini_solver import solve_problem_with_gemini, format_model_name
 import download_fonts
 
 try:
@@ -363,7 +363,7 @@ if not st.session_state.get("user"):
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; max-width: 1050px; margin: 40px auto 20px auto;">
         <div class="saas-card" style="margin-bottom: 0; padding: 20px;">
             <div style="font-size: 1.6rem; margin-bottom: 8px;">⚡</div>
-            <div style="font-weight: 700; font-size: 1rem; color: #f8fafc; margin-bottom: 6px;">Gemini 3.x Flash 플래그십</div>
+            <div style="font-weight: 700; font-size: 1rem; color: #f8fafc; margin-bottom: 6px;">Gemini 3.8 Flash 플래그십</div>
             <div style="font-size: 0.85rem; color: #94a3b8; line-height: 1.5;">최신 멀티모달 추론 엔진이 복잡한 고난도 수식과 논리 기호까지 완벽히 해독하여 정밀 해설을 도출합니다.</div>
         </div>
         <div class="saas-card" style="margin-bottom: 0; padding: 20px;">
@@ -389,6 +389,11 @@ if not current_user:
 is_admin = (current_user.get("role") == "admin")
 uname = current_user.get("username", "회원")
 
+# 활성 AI 모델 정확한 명칭 결정
+current_active_model = "Gemini 3.8 Flash"
+if "solution_data" in st.session_state and st.session_state["solution_data"].get("used_model"):
+    current_active_model = format_model_name(st.session_state["solution_data"]["used_model"])
+
 
 # ----------------- 상단 글로벌 SaaS 네비게이션 헤더 -----------------
 st.markdown(f"""
@@ -404,7 +409,7 @@ st.markdown(f"""
         </div>
     </div>
     <div style="display: flex; align-items: center; gap: 14px;">
-        <span class="status-badge-active">● AI 엔진 정상 가동 중 (Gemini 3.x)</span>
+        <span class="status-badge-active">● AI 엔진 정상 가동 중 ({current_active_model})</span>
         <div style="background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(255,255,255,0.1); padding: 5px 14px; border-radius: 10px; font-size: 0.85rem; font-weight: 600; color: #f1f5f9;">
             {'👑' if is_admin else '👤'} {uname} {'(관리자)' if is_admin else '님'}
         </div>
@@ -768,7 +773,7 @@ with col_preview:
         
         # 상세 구조화 풀이 리포트 카드
         data = st.session_state.get("solution_data", {})
-        used_m = data.get("used_model", "Gemini 3.x Flash")
+        used_m = format_model_name(data.get("used_model", "Gemini 3.8 Flash"))
         
         with st.expander("📝 AI 해설 상세 분석 리포트", expanded=True):
             st.markdown(f"""
