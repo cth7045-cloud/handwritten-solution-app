@@ -84,44 +84,91 @@ def solve_problem_with_gemini(
     "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트"
 }
 """
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.2
-        )
-
-        # 최고 성능 모델부터 순환 시도 (최상위 지능 3.8-flash -> 최고 추론 2.5-pro -> 고속 추론 2.5-flash -> 2.0-flash)
-        candidate_models = [
+        # 기본 우선순위 모델 목록 (최신 3.x 세대 우선)
+        base_priority = [
             "gemini-3.8-flash",
-            "gemini-2.5-pro",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
             "gemini-2.5-flash",
-            "gemini-2.0-flash"
+            "gemini-2.5-pro",
         ]
-        response = None
+        
+        # 키에 활성화된 모델 목록 동적 조회 시도
+        candidate_models = list(base_priority)
+        try:
+            active_from_api = []
+            for m in client.models.list():
+                m_name = m.name.replace("models/", "") if hasattr(m, "name") and m.name else ""
+                if "gemini" in m_name and "image" not in m_name and "embedding" not in m_name and "transcribe" not in m_name:
+                    active_from_api.append(m_name)
+            
+            if active_from_api:
+                # base_priority에 있는 것 중 활성화된 것을 우선 순서대로 배치
+                ordered = [m for m in base_priority if m in active_from_api]
+                # 그 외 활성화된 최신 모델도 뒤에 추가 (구형 2.0 및 1.x 제외)
+                for m in active_from_api:
+                    if m not in ordered and not m.startswith("gemini-2.0") and not m.startswith("gemini-1."):
+                        ordered.append(m)
+                if ordered:
+                    candidate_models = ordered
+        except Exception as e:
+            print(f"[*] 모델 목록 동적 조회 생략: {e}")
+
+        response_text = None
         used_model = None
-        last_err = None
+        attempt_logs = []
+
+        part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
 
         for model_code in candidate_models:
+            # 1. generate_content with json config
             try:
-                response = client.models.generate_content(
+                config = types.GenerateContentConfig(response_mime_type="application/json")
+                resp = client.models.generate_content(
                     model=model_code,
-                    contents=[
-                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                        prompt
-                    ],
+                    contents=[part, prompt],
                     config=config
                 )
-                if response and response.text:
+                if resp and resp.text:
+                    response_text = resp.text
                     used_model = model_code
                     break
-            except Exception as err:
-                last_err = err
-                print(f"[!] {model_code} 시도 실패: {err}")
-                continue
+            except Exception as e1:
+                # 2. generate_content without config (thinking 모델 또는 config 거부 시 폴백)
+                try:
+                    resp = client.models.generate_content(
+                        model=model_code,
+                        contents=[part, prompt]
+                    )
+                    if resp and resp.text:
+                        response_text = resp.text
+                        used_model = model_code
+                        break
+                except Exception as e2:
+                    # 3. Interactions API 폴백
+                    try:
+                        b64_img = base64.b64encode(image_bytes).decode("utf-8")
+                        inter = client.interactions.create(
+                            model=model_code,
+                            input=[
+                                {"type": "text", "text": prompt},
+                                {"type": "image", "data": b64_img, "mime_type": mime_type}
+                            ]
+                        )
+                        if inter and hasattr(inter, "output_text") and inter.output_text:
+                            response_text = inter.output_text
+                            used_model = f"{model_code} (Interactions API)"
+                            break
+                    except Exception as e3:
+                        attempt_logs.append(f"[{model_code}] {e1}")
 
-        if not response or not response.text:
-            raise Exception(f"AI 모델 응답을 받지 못했습니다. (마지막 시도 에러: {last_err})")
+        if not response_text:
+            err_summary = "\n".join(attempt_logs[:4])
+            raise Exception(f"사용 가능한 AI 모델을 찾지 못했습니다.\n{err_summary}")
         
-        text_output = response.text.strip()
+        text_output = response_text.strip()
         
         # JSON 블록 안전 추출
         start_idx = text_output.find("{")
