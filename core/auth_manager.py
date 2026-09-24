@@ -5,7 +5,7 @@ import os
 import sqlite3
 import hashlib
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple, Any
 
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -66,6 +66,16 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN api_key TEXT DEFAULT ''")
     except Exception:
         pass
+
+    # 4. 사용자 세션 테이블 (로그인 상태 유지용 영구 토큰)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_sessions (
+        token TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """)
 
     conn.commit()
     
@@ -181,9 +191,10 @@ def change_password(username: str, new_password: str) -> Tuple[bool, str]:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET password_hash = ?, salt = ? WHERE username = ?", (pw_hash, salt, username))
+    cursor.execute("DELETE FROM user_sessions WHERE username = ?", (username,))
     conn.commit()
     conn.close()
-    return True, "비밀번호가 성공적으로 변경되었습니다."
+    return True, "비밀번호가 성공적으로 변경되었습니다. 모든 기기에서 다시 로그인해주세요."
 
 def set_system_setting(key: str, value: str):
     """관리자 전용 전역 설정 저장 (예: 공용 API 키)"""
@@ -224,6 +235,73 @@ def get_user_api_key(username: str) -> str:
     if row and "api_key" in row.keys() and row["api_key"]:
         return row["api_key"]
     return ""
+
+def create_session(username: str, days: int = 30) -> str:
+    """새로운 로그인 세션 토큰을 생성하고 DB에 안전하게 저장합니다 (기본 30일)."""
+    token = secrets.token_urlsafe(32)
+    now = datetime.now()
+    expires_at = (now + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    # 만료된 세션 자동 정리
+    cursor.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now_str,))
+    cursor.execute("""
+    INSERT INTO user_sessions (token, username, expires_at, created_at)
+    VALUES (?, ?, ?, ?)
+    """, (token, username, expires_at, now_str))
+    conn.commit()
+    conn.close()
+    return token
+
+def validate_session(token: str) -> Optional[Dict[str, Any]]:
+    """세션 토큰의 유효성을 검증하고 유효한 경우 사용자 정보를 즉시 반환합니다."""
+    if not token or not isinstance(token, str):
+        return None
+    token = token.strip()
+    if not token:
+        return None
+        
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT s.username, u.id, u.role, u.is_active, u.solve_count, u.created_at
+    FROM user_sessions s
+    JOIN users u ON s.username = u.username
+    WHERE s.token = ? AND s.expires_at > ? AND u.is_active = 1
+    """, (token, now_str))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            "id": row["id"],
+            "username": row["username"],
+            "role": row["role"],
+            "solve_count": row["solve_count"],
+            "created_at": row["created_at"]
+        }
+    return None
+
+def revoke_session(token: str):
+    """지정된 세션 토큰을 DB에서 삭제(무효화)합니다."""
+    if not token:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM user_sessions WHERE token = ?", (token.strip(),))
+    conn.commit()
+    conn.close()
+
+def revoke_all_user_sessions(username: str):
+    """사용자의 모든 활성 세션을 삭제합니다."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM user_sessions WHERE username = ?", (username,))
+    conn.commit()
+    conn.close()
 
 # 초기화 실행
 init_db()

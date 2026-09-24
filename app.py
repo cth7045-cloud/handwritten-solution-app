@@ -47,8 +47,16 @@ from core.auth_manager import (
     register_user, authenticate_user, get_all_users,
     update_user_status, increment_solve_count, change_password,
     get_system_setting, set_system_setting,
-    save_user_api_key, get_user_api_key
+    save_user_api_key, get_user_api_key,
+    create_session, validate_session, revoke_session
 )
+
+try:
+    from streamlit_cookies_controller import CookieController
+    cookie_controller = CookieController()
+except Exception:
+    cookie_controller = None
+
 
 # ----------------- 정식 상용 서비스 테마 CSS 주입 -----------------
 CUSTOM_CSS = """
@@ -224,6 +232,38 @@ div[data-baseweb="tab"][aria-selected="true"] {
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
+# ----------------- 자동 로그인 (로그인 상태 유지) 확인 -----------------
+if not st.session_state.get("user"):
+    # 1. URL 쿼리 파라미터 확인 (지연 없는 0ms 즉시 세션 복원)
+    active_token = st.query_params.get("session") or st.query_params.get("auth_token")
+    
+    # 2. 브라우저 쿠키 확인 (URL 파라미터가 없는 새 탭 / 재방문 시)
+    if not active_token and cookie_controller:
+        try:
+            active_token = cookie_controller.get("scribenote_session")
+        except Exception:
+            active_token = None
+            
+    if active_token:
+        auto_user = validate_session(active_token)
+        if auto_user:
+            st.session_state["user"] = auto_user
+            st.session_state["session_token"] = active_token
+            # URL 파라미터 동기화
+            if st.query_params.get("session") != active_token:
+                st.query_params["session"] = active_token
+        else:
+            # 만료되거나 유효하지 않은 세션 삭제
+            if "session" in st.query_params:
+                del st.query_params["session"]
+            if "auth_token" in st.query_params:
+                del st.query_params["auth_token"]
+            if cookie_controller:
+                try:
+                    cookie_controller.remove("scribenote_session")
+                except Exception:
+                    pass
+
 # ----------------- 로그인 / 회원가입 게이트 -----------------
 if not st.session_state.get("user"):
     # 서비스 소개 상단 히어로 배너
@@ -251,15 +291,29 @@ if not st.session_state.get("user"):
             st.markdown("<p style='font-size: 0.9rem; color: #94a3b8; margin-bottom: 16px;'>등록된 계정으로 로그인하여 나만의 손글씨 풀이 노트를 만드세요.</p>", unsafe_allow_html=True)
             login_id = st.text_input("아이디", key="login_id_input", placeholder="아이디를 입력하세요")
             login_pw = st.text_input("비밀번호", type="password", key="login_pw_input", placeholder="비밀번호를 입력하세요")
+            
+            # 로그인 상태 유지 체크박스 (기본 활성화)
+            remember_me = st.checkbox("🔒 로그인 상태 유지 (30일간 자동 로그인)", value=True, key="chk_remember_me", help="체크하시면 브라우저를 닫거나 새로고침해도 다시 로그인할 필요 없이 바로 이용하실 수 있습니다.")
+            
             st.write("")
             if st.button("로그인 후 시작하기", type="primary", use_container_width=True, key="btn_do_login"):
                 ok, user_info, msg = authenticate_user(login_id, login_pw)
                 if ok:
                     st.session_state["user"] = user_info
+                    if remember_me:
+                        new_token = create_session(user_info["username"], days=30)
+                        st.session_state["session_token"] = new_token
+                        st.query_params["session"] = new_token
+                        if cookie_controller:
+                            try:
+                                cookie_controller.set("scribenote_session", new_token, max_age=30 * 86400, same_site='lax')
+                            except Exception:
+                                pass
                     st.success(f"{user_info['username']}님, 환영합니다!")
                     st.rerun()
                 else:
                     st.error(msg)
+
 
         with tab_signup:
             st.markdown("<p style='font-size: 0.9rem; color: #94a3b8; margin-bottom: 16px;'>간단한 아이디와 비밀번호만으로 즉시 가입하실 수 있습니다.</p>", unsafe_allow_html=True)
@@ -336,6 +390,13 @@ st.markdown(f"""
 # ----------------- 사이드바 설정 허브 -----------------
 with st.sidebar:
     # 1. 회원 프로필 카드
+    is_remembered = bool(st.session_state.get("session_token") or st.query_params.get("session"))
+    session_badge_html = """
+    <div style="margin-top: 8px; font-size: 0.72rem; color: #34d399; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25); padding: 4px 8px; border-radius: 6px; text-align: center; font-weight: 500;">
+        🔒 로그인 상태 유지 중 (30일)
+    </div>
+    """ if is_remembered else ""
+
     st.markdown(f"""
     <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 16px; margin-bottom: 16px;">
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
@@ -350,11 +411,30 @@ with st.sidebar:
         <div style="font-size: 0.75rem; color: #cbd5e1; background: rgba(15, 23, 42, 0.6); padding: 6px 10px; border-radius: 6px; text-align: center;">
             누적 풀이 횟수: <b>{current_user.get('solve_count', 0)}회</b>
         </div>
+        {session_badge_html}
     </div>
     """, unsafe_allow_html=True)
 
-    if st.button("로그아웃", key="btn_logout", use_container_width=True):
+    if st.button("🚪 안전 로그아웃", key="btn_logout", use_container_width=True):
+        current_token = st.session_state.get("session_token") or st.query_params.get("session") or st.query_params.get("auth_token")
+        if current_token:
+            revoke_session(current_token)
+        
+        if "session" in st.query_params:
+            del st.query_params["session"]
+        if "auth_token" in st.query_params:
+            del st.query_params["auth_token"]
+            
+        if cookie_controller:
+            try:
+                cookie_controller.remove("scribenote_session")
+            except Exception:
+                pass
+                
         st.session_state["user"] = None
+        if "session_token" in st.session_state:
+            del st.session_state["session_token"]
+        st.toast("안전하게 로그아웃되었습니다.", icon="👋")
         st.rerun()
 
     st.markdown("---")
