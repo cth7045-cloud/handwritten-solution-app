@@ -1,0 +1,21 @@
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test outputs & temporary files
+test_output/
+*.log
+cloudflared.exe
+*.bat
+assets/public_url.txt
+create_shortcut.vbs
+
+# OS generated
+.DS_Store
+Thumbs.db

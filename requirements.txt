@@ -1,0 +1,7 @@
+google-genai>=2.25.0
+streamlit>=1.40.0
+pillow>=10.0.0
+requests>=2.30.0
+numpy>=1.24.0
+fonttools>=4.50.0
+qrcode>=8.0
