@@ -549,6 +549,190 @@ class HandwrittenDiagramEngine:
             
         return img
 
+    def render_dual_graph(
+        self,
+        diagram_data: Dict[str, Any],
+        font_name: str,
+        pen_style: str,
+        width: int = 440,
+        height: int = 400
+    ) -> Image.Image:
+        """
+        도함수 f(x)와 원함수 g(x) 등 2개의 함수 그래프를 위아래로 나란히 배치하고,
+        영점(Roots)에서 극값/변곡점으로 세로 점선 지시선을 연결하여
+        수능 1타 강사의 실전 연계 그래프를 완벽하게 렌더링합니다.
+        """
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        main_color, stroke_w = self._get_pen_color_and_width(pen_style)
+        axis_color = (max(0, main_color[0] - 10), max(0, main_color[1] - 10), max(0, main_color[2] - 10), min(230, main_color[3]))
+        accent_blue = (18, 48, 145, 240)
+        accent_green = (34, 139, 34, 220)
+        accent_red = (205, 40, 40, 210)
+        font = self.hw_engine.load_font(font_name, 16)
+        lbl_font = self.hw_engine.load_font(font_name, 15)
+        title_font = self.hw_engine.load_font(font_name, 17)
+
+        # 1. 상단 그래프 설정
+        top_data = diagram_data.get("top_graph", {})
+        top_y_center = int(height * 0.22)
+        top_x_left = 35
+        top_x_right = width - 35
+        cx = (top_x_left + top_x_right) // 2
+
+        # 상단 x축
+        self._draw_wobbly_line(draw, (top_x_left, top_y_center), (top_x_right, top_y_center), axis_color, width=stroke_w)
+
+        # 상단 함수 곡선
+        x_scale = 55
+        funcs_top = top_data.get("functions", [])
+        if not funcs_top:
+            funcs_top = [{"expr": "0.5*x**2 - 0.7", "color": "blue", "label": "f(x)"}]
+
+        for f_info in funcs_top:
+            expr = f_info.get("expr", "0.5*x**2 - 0.7").replace("^", "**")
+            f_color = accent_blue if f_info.get("color") == "blue" else main_color
+            xs = np.linspace(-2.2, 2.2, 90)
+            pts_top = []
+            safe_dict = {"x": xs, "np": np, "math": math, "abs": np.abs}
+            try:
+                ys = eval(expr, {"__builtins__": {}}, safe_dict)
+                if isinstance(ys, (int, float)):
+                    ys = np.full_like(xs, ys)
+                for x_val, y_val in zip(xs, ys):
+                    px = cx + float(x_val) * x_scale
+                    py = top_y_center - float(y_val) * 40
+                    if 15 <= py <= top_y_center + 45:
+                        pts_top.append((px, py))
+            except Exception as e:
+                print(f"[!] 상단 곡선 계산 오류: {e}")
+
+            if len(pts_top) >= 2:
+                for i in range(len(pts_top) - 1):
+                    draw.line([pts_top[i], pts_top[i+1]], fill=f_color, width=stroke_w + 1)
+
+            lbl = f_info.get("label", "f(x)")
+            if lbl:
+                self._draw_text(draw, (top_x_right - 35, top_y_center - 45), lbl, f_color, title_font, font_name)
+
+        # 상단 부호 (+, -)
+        signs = top_data.get("signs", [
+            {"x": -1.5, "text": "+"},
+            {"x": 0, "text": "-"},
+            {"x": 1.5, "text": "+"}
+        ])
+        for s in signs:
+            sx = cx + float(s.get("x", 0)) * x_scale
+            sy = top_y_center - 22 if s.get("text") == "+" else top_y_center + 5
+            self._draw_text(draw, (sx - 4, sy), s.get("text", "+"), main_color, font, font_name)
+
+        # 상단 특징점 (예: (0, -c))
+        for pt in top_data.get("points", [{"x": 0, "y": -0.7, "label": "(0,-c)"}]):
+            px = cx + float(pt.get("x", 0)) * x_scale
+            py = top_y_center - float(pt.get("y", 0)) * 40
+            draw.ellipse([px - 3, py - 3, px + 3, py + 3], fill=main_color)
+            p_lbl = pt.get("label", "")
+            if p_lbl:
+                self._draw_text(draw, (px - 16, py + 5), p_lbl, main_color, lbl_font, font_name)
+
+        # 2. 하단 그래프 설정
+        bot_data = diagram_data.get("bottom_graph", {})
+        bot_y_center = int(height * 0.68)
+        bot_x_left = 35
+        bot_x_right = width - 35
+
+        # 하단 x축
+        self._draw_wobbly_line(draw, (bot_x_left, bot_y_center), (bot_x_right, bot_y_center), axis_color, width=stroke_w)
+
+        # 세로 점선 지시선 (상단 영점 -> 하단 극값)
+        connectors = diagram_data.get("connectors", [-1.18, 0.0, 1.18])
+        for c_x in connectors:
+            line_x = cx + float(c_x) * x_scale
+            self._draw_wobbly_line(draw, (line_x, top_y_center), (line_x, bot_y_center - 32), (130, 150, 185, 180), width=1, dashed=True)
+
+        # 수평 기준선 (Peak Height)
+        self._draw_wobbly_line(draw, (cx - 100, bot_y_center - 32), (cx + 100, bot_y_center - 32), (130, 150, 185, 170), width=1, dashed=True)
+
+        # 하단 사각형 (Rectangle highlight)
+        rect_info = bot_data.get("rectangle", {"x1": -1.6, "y1": 0, "x2": 1.6, "y2": 1.5, "color": "green"})
+        if rect_info:
+            r_x1 = cx + float(rect_info.get("x1", -1.6)) * (x_scale * 0.95)
+            r_x2 = cx + float(rect_info.get("x2", 1.6)) * (x_scale * 0.95)
+            r_top = bot_y_center - 32
+            r_bot = bot_y_center
+            self._draw_wobbly_line(draw, (r_x1, r_top), (r_x2, r_top), accent_green, width=2)
+            self._draw_wobbly_line(draw, (r_x1, r_top), (r_x1, r_bot), accent_green, width=2)
+            self._draw_wobbly_line(draw, (r_x2, r_top), (r_x2, r_bot), accent_green, width=2)
+
+            # 빗금 채우기 (Hatching)
+            for c in range(-width, height + width, 8):
+                p1 = (c, r_top)
+                p2 = (c + 32, r_bot)
+                if r_x1 <= p1[0] <= r_x2 or r_x1 <= p2[0] <= r_x2:
+                    draw.line([max(r_x1, p1[0]), r_top, min(r_x2, p2[0]), r_bot], fill=accent_red, width=1)
+
+        # 하단 함수 곡선 (g(x))
+        funcs_bot = bot_data.get("functions", [])
+        if not funcs_bot:
+            funcs_bot = [{"expr": "-(x**2 - 1.4)**2 + 1.96", "color": "blue", "label": "g(x)"}]
+
+        for f_info in funcs_bot:
+            expr = f_info.get("expr", "-(x**2 - 1.4)**2 + 1.96").replace("^", "**")
+            f_color = accent_blue if f_info.get("color") == "blue" else main_color
+            xs_b = np.linspace(-2.2, 2.2, 100)
+            pts_bot = []
+            safe_dict = {"x": xs_b, "np": np, "math": math, "abs": np.abs}
+            try:
+                ys = eval(expr, {"__builtins__": {}}, safe_dict)
+                if isinstance(ys, (int, float)):
+                    ys = np.full_like(xs_b, ys)
+                for x_val, y_val in zip(xs_b, ys):
+                    px = cx + float(x_val) * (x_scale * 0.95)
+                    py = bot_y_center - float(y_val) * 16.5
+                    if top_y_center + 30 <= py <= height - 10:
+                        pts_bot.append((px, py))
+            except Exception as e:
+                print(f"[!] 하단 곡선 계산 오류: {e}")
+
+            if len(pts_bot) >= 2:
+                for i in range(len(pts_bot) - 1):
+                    draw.line([pts_bot[i], pts_bot[i+1]], fill=f_color, width=stroke_w + 1)
+
+            lbl = f_info.get("label", "g(x)")
+            if lbl:
+                self._draw_text(draw, (bot_x_right - 35, bot_y_center - 55), lbl, f_color, title_font, font_name)
+
+        # 하단 점 및 레이블 (a1, a2, 0, a3, a4 등)
+        pts_list = bot_data.get("points", [
+            {"x": -1.9, "label": "a1", "sub_label": "= a"},
+            {"x": -1.0, "label": "a2"},
+            {"x": 0.0, "label": "0"},
+            {"x": 1.0, "label": "a3"},
+            {"x": 1.9, "label": "a4"}
+        ])
+        for p in pts_list:
+            px = cx + float(p.get("x", 0)) * (x_scale * 0.95)
+            draw.ellipse([px - 2.5, bot_y_center - 2.5, px + 2.5, bot_y_center + 2.5], fill=main_color)
+            lbl = p.get("label", "")
+            if lbl:
+                self._draw_text(draw, (px - 6, bot_y_center + 6), lbl, main_color, lbl_font, font_name)
+            sub = p.get("sub_label", "")
+            if sub:
+                self._draw_text(draw, (px - 6, bot_y_center + 24), sub, main_color, lbl_font, font_name)
+
+        # 부가 노트 (예: m = 4)
+        for note in bot_data.get("notes", [{"x": 1.5, "text": "m = 4"}]):
+            nx = cx + float(note.get("x", 1.5)) * (x_scale * 0.95)
+            self._draw_text(draw, (nx, bot_y_center + 45), note.get("text", "m = 4"), main_color, title_font, font_name)
+
+        # 다이어그램 상단 타이틀
+        diag_title = diagram_data.get("title", "")
+        if diag_title:
+            self._draw_text(draw, (20, 6), f"[{diag_title}]", main_color, font, font_name)
+
+        return img
+
     def render_diagram(
         self,
         diagram_data: Dict[str, Any],
@@ -563,7 +747,9 @@ class HandwrittenDiagramEngine:
         d_type = str(diagram_data.get("diagram_type") or diagram_data.get("type", "coordinate_plane")).lower()
         w = min(max_width, 450)
 
-        if "number_line" in d_type or "수직선" in d_type:
+        if "dual" in d_type or "linked" in d_type or "연계" in d_type or "두함수" in d_type:
+            return self.render_dual_graph(diagram_data, font_name, pen_style, width=w, height=400)
+        elif "number_line" in d_type or "수직선" in d_type:
             return self.render_number_line(diagram_data, font_name, pen_style, width=w, height=140)
         elif "geometry" in d_type or "도형" in d_type or "triangle" in d_type or "circle" in d_type:
             return self.render_geometry(diagram_data, font_name, pen_style, width=w, height=250)
@@ -572,3 +758,4 @@ class HandwrittenDiagramEngine:
         else:
             # 기본: 좌표평면 및 함수 그래프
             return self.render_coordinate_plane(diagram_data, font_name, pen_style, width=w, height=300)
+

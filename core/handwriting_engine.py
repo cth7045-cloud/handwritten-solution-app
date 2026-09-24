@@ -11,33 +11,48 @@ from fontTools.ttLib import TTFont
 
 # 사용 가능한 폰트 파일 매핑 (한국어 이름)
 FONT_MAP = {
+    # 1. 수학 강사/과외 노트 전문 필기체 (실제 수험생·강사 손글씨 스타일)
+    "수학 1타 강사 필기체 (암스테르담)": "NanumAmsterdam.ttf",
+    "수험생 실전 필기체 (갈맷글)": "NanumGalMaetGeul.ttf",
+    "자연스러운 과외노트체 (바른히피)": "NanumBaReunHiPi.ttf",
+    "깔끔한 볼펜 풀이체 (중학생)": "NanumJungHakSaeng.ttf",
+    "빠른 실전 메모체 (야근하는 김주임)": "NanumKimJuIm.ttf",
+    "단정한 손편지체 (손편지체)": "NanumSonPyeonJi.ttf",
+    "고려글꼴 (고전 필기체)": "NanumGoryeo.ttf",
+    # 2. 클래식 손글씨 폰트
     "나눔손글씨 펜체 (시원한 필기체)": "NanumPenScript-Regular.ttf",
-    "개구체 (귀여운 또박또박체)": "Gaegu-Regular.ttf",
-    "연성체 (단정한 모범생체)": "YeonSung-Regular.ttf",
-    "동글체 (동글동글 캐주얼체)": "Dongle-Regular.ttf",
-    "하이멜로디체 (감성 손메모체)": "HiMelody-Regular.ttf",
-    "고운돋움체 (깔끔한 필기체)": "GowunDodum-Regular.ttf",
+    "단정한 모범생체 (연성체)": "YeonSung-Regular.ttf",
+    "깔끔한 필기체 (고운돋움체)": "GowunDodum-Regular.ttf",
+    "귀여운 또박또박체 (개구체)": "Gaegu-Regular.ttf",
+    "동글동글 캐주얼체 (동글체)": "Dongle-Regular.ttf",
+    "감성 손메모체 (하이멜로디체)": "HiMelody-Regular.ttf",
 }
 
 # 펜/필기구 색상 프리셋
 PEN_STYLES = {
+    "1타 강사 딥블루 잉크 (실전 필기 펜)": {
+        "color": (16, 45, 142, 245),      # 수능 킬러 풀이 실전 블루잉크
+        "jitter_y": 0.85,
+        "rotation_deg": 0.8,
+        "alpha_var": 16,
+    },
     "파란색 볼펜": {
         "color": (28, 65, 175, 235),      # 클래식 수험생 블루
         "jitter_y": 1.0,
         "rotation_deg": 1.0,
         "alpha_var": 20,
     },
-    "연필 / 샤프": {
-        "color": (60, 60, 60, 210),       # 흑연 회색
-        "jitter_y": 1.3,
-        "rotation_deg": 1.2,
-        "alpha_var": 30,
-    },
     "검정색 젤펜": {
         "color": (25, 25, 25, 245),       # 또렷한 검정
         "jitter_y": 0.6,
         "rotation_deg": 0.6,
         "alpha_var": 12,
+    },
+    "연필 / 샤프": {
+        "color": (60, 60, 60, 210),       # 흑연 회색
+        "jitter_y": 1.3,
+        "rotation_deg": 1.2,
+        "alpha_var": 30,
     },
     "빨간색 채점펜": {
         "color": (215, 35, 35, 235),      # 채점용 레드
@@ -101,6 +116,13 @@ MATH_FALLBACK_MAP = {
     "∩": "n",
     "∅": "공집합",
     "∞": "inf",
+    "∫": "int ",
+    "∬": "iint ",
+    "∮": "oint ",
+    "∑": "sigma ",
+    "∏": "pi ",
+    "′": "'",
+    "″": "''",
 }
 
 
@@ -344,3 +366,43 @@ class HandwritingEngine:
         result = base_img.convert("RGBA") if base_img.mode != "RGBA" else base_img.copy()
         result.alpha_composite(overlay)
         return result
+
+    def draw_answer_circle(
+        self,
+        base_img: Image.Image,
+        bbox: Tuple[float, float, float, float],
+        color: Tuple[int, int, int, int] = (16, 45, 142, 235),
+        width: int = 2
+    ) -> Image.Image:
+        """
+        수학 해설지에서 최종 정답 주위에 사람이 손으로 펜을 돌려 그린 듯한 자연스러운 타원 동그라미를 그립니다.
+        """
+        overlay = Image.new("RGBA", base_img.size, (255, 255, 255, 0))
+        draw = ImageDraw.Draw(overlay)
+
+        x1, y1, x2, y2 = bbox
+        cx = (x1 + x2) / 2
+        cy = (y1 + y2) / 2
+        pad_x = 10
+        pad_y = 6
+        rx = max(18.0, (x2 - x1) / 2 + pad_x) * random.uniform(0.98, 1.08)
+        ry = max(16.0, (y2 - y1) / 2 + pad_y) * random.uniform(0.95, 1.05)
+
+        points = []
+        steps = 45
+        start_angle = random.uniform(-35, -15)
+        total_angle = random.uniform(375, 395)
+        for s in range(steps + 1):
+            theta = math.radians(start_angle + s * (total_angle / steps))
+            jitter = random.uniform(-0.8, 0.8)
+            x = cx + (rx + jitter) * math.cos(theta)
+            y = cy + (ry + jitter) * math.sin(theta)
+            points.append((x, y))
+
+        for i in range(len(points) - 1):
+            draw.line([points[i], points[i + 1]], fill=color, width=width)
+
+        result = base_img.convert("RGBA") if base_img.mode != "RGBA" else base_img.copy()
+        result.alpha_composite(overlay)
+        return result
+

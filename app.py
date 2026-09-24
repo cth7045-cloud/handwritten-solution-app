@@ -562,13 +562,25 @@ with st.sidebar:
     
     st.markdown("---")
 
-    # 4. 필기체 및 펜 스타일 스튜디오
-    st.subheader("✍️ 필기 스타일 스튜디오")
+    # 4. 풀이 방식 및 필기 스타일 스튜디오
+    st.subheader("✍️ 풀이 방식 & 필기 스튜디오")
+    
+    solve_style_label = st.radio(
+        "문제 풀이 방식",
+        options=[
+            "⚡ 수능 1타 강사 실전 압축 풀이 (그래프 연계·직관 풀이)",
+            "📖 친절한 개념 정석 풀이 (단계별 상세 해설)"
+        ],
+        index=0,
+        help="수능 킬러/준킬러 문항처럼 직관적 연계 그래프와 압축 수식으로 풀이할지, 친절한 정석 해설로 풀이할지 선택합니다."
+    )
+    solve_style = "killer_tutor" if "1타 강사" in solve_style_label else "standard_concept"
+
     selected_pen = st.selectbox(
         "필기구(펜) 스타일",
         options=list(PEN_STYLES.keys()),
         index=0,
-        help="0.5mm 흑색 볼펜, 블루 볼펜, 샤프/연필, 채점용 레드펜 등을 지원합니다."
+        help="수능 실전 딥블루 잉크, 0.5mm 볼펜, 샤프/연필, 채점용 레드펜 등을 지원합니다."
     )
 
     selected_font = st.selectbox(
@@ -585,12 +597,13 @@ with st.sidebar:
         use_container_width=True
     )
 
-    # 6종 전체 폰트 한눈에 비교하기
-    with st.expander("👀 6종 전체 필체 한눈에 비교하기", expanded=False):
-        st.caption("현재 선택된 펜 스타일로 6가지 폰트의 실제 글씨체를 비교합니다:")
+    # 손글씨 폰트 전체 한눈에 비교하기
+    with st.expander("👀 손글씨 폰트 전체 한눈에 비교하기", expanded=False):
+        st.caption("현재 선택된 펜 스타일로 등록된 손글씨 폰트들의 실제 글씨체를 비교합니다:")
         for f_name in FONT_MAP.keys():
             st.markdown(f"<div style='font-size:0.83rem; font-weight:600; color:#cbd5e1; margin-top:8px; margin-bottom:3px;'>· {f_name}</div>", unsafe_allow_html=True)
             st.image(get_font_preview_image(f_name, selected_pen), use_container_width=True)
+
 
     
     layout_mode = st.radio(
@@ -710,7 +723,8 @@ with col_preview:
                 solution_data = solve_problem_with_gemini(
                     image_bytes=image_bytes,
                     mime_type="image/png",
-                    api_key=api_key_input
+                    api_key=api_key_input,
+                    solve_style=solve_style
                 )
                 time.sleep(0.3)
             

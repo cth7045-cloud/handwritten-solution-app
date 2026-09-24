@@ -40,11 +40,13 @@ def format_model_name(raw_name: Optional[str]) -> str:
 def solve_problem_with_gemini(
     image_bytes: bytes,
     mime_type: str = "image/png",
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    solve_style: str = "killer_tutor"
 ) -> Dict[str, Any]:
     """
     Gemini API를 호출하여 이미지 속 문제를 풀이합니다.
     API 키가 없거나 미등록 시 명확한 에러 안내를 반환합니다.
+    solve_style: 'killer_tutor' (수능 1타 강사 실전 압축 풀이) | 'standard_concept' (친절한 개념 정석 풀이)
     """
     key = (api_key or os.environ.get("GEMINI_API_KEY", "")).strip()
     
@@ -77,45 +79,69 @@ def solve_problem_with_gemini(
     try:
         client = genai.Client(api_key=key)
         
-        prompt = """
-당신은 친절하고 꼼꼼한 수학/과학/논리학 과외 선생님입니다.
-업로드된 문제집/교재 사진 속 문제를 파악하고, 학생이 공책에 적어둔 것처럼 친근하고 명확한 손글씨 풀이 노트를 작성해야 합니다.
-손글씨 필기용이므로 각 단계는 한두 줄 이내로 깔끔하게 정리해주시고, 복잡한 LaTeX 대신 공책에 손글씨로 적기 편한 명확한 기호(예: +, -, *, /, ^2, =>, <=>, v, ^, ~ 등)를 주로 사용해주세요.
+        if solve_style == "killer_tutor":
+            prompt = """
+당신은 대한민국 최고 수준의 수능/모의평가 수학 1타 강사입니다.
+업로드된 문제집/교재 사진 속 문제를 분석하고, 상위권 수험생이나 전문 강사가 시험지 여백에 작성하는 【직관적 그래프 연계와 압축된 핵심 수식 유도】 형태의 최고급 실전 킬러 풀이 노트를 작성해야 합니다.
 
-[★ 시각적 그래프 및 다이어그램 적극 활용 지침 ★]
-학생들의 직관적 이해를 돕기 위해, 문제가 함수, 부등식, 기하, 집합, 확률 등 시각화가 가능한 경우 **반드시 적극적으로 "has_diagram": true와 함께 "diagram" 객체를 작성해주세요.**
-시스템의 손글씨 다이어그램 엔진이 이를 학생이 펜으로 직접 그린 듯한 자연스러운 스케치로 자동 렌더링합니다.
+[★ 수능 1타 강사 실전 압축 풀이 작성 원칙 ★]
+1. 장황하고 교과서적인 서술("1단계: 양변을 x에 대하여 미분하여 도함수를 구합니다..." 등)을 철저히 배제하세요.
+2. 실전 문제 풀이처럼 핵심 관계식과 직관적인 지시 화살표(=> 높이차, => 사각형넓이, => 대칭성 등)를 사용하여 단계별 풀이("steps")를 작성하세요.
+   작성 스타일 예시:
+   - "g'(x) = f(x) = ln(x^4 + 1) - c"
+   - "g'(1) = 0 = ln 2 - c  =>  c = ln 2"
+   - "∫_0^1 |f(x)|dx = g(0) => 높이차"
+   - "∫_{a1}^{a4} g(x)dx => 사각형넓이 = (a4 - a1) * g(0) = 2a4 * g(0)"
+   - "2a4 * ∫_0^1 |f(x)|dx = 2am * ∫_0^1 |f(x)|dx  =>  k = 2, m = 4"
+   - "mk * e^c = 4 * 2 * e^(ln 2) = 4 * 2 * 2 = 16"
+3. 복잡한 수식이나 미적분, 다항함수, 지수로그, 삼각함수, 도함수와 원함수의 연계 분석이 필요한 경우, 반드시 적극적으로 "has_diagram": true와 함께 "diagram" 객체를 작성해주세요.
 
 지원되는 diagram_type 및 작성 규격:
-1. "coordinate_plane" (함수 그래프, 이차함수, 삼각함수, 지수로그, 미적분 접선/극값/정적분 넓이 등):
+1. "dual_graph" (★ 수능 킬러/준킬러 도함수-원함수 연계 개형, 위아래 2단 그래프):
+{
+    "diagram_type": "dual_graph",
+    "title": "도함수 f(x)와 원함수 g(x)의 연계 개형",
+    "top_graph": {
+        "functions": [{"expr": "0.5*x**2 - 0.7", "color": "blue", "label": "f(x)"}],
+        "signs": [{"x": -1.5, "text": "+"}, {"x": 0, "text": "-"}, {"x": 1.5, "text": "+"}],
+        "points": [{"x": 0, "y": -0.7, "label": "(0, -c)"}]
+    },
+    "connectors": [-1.18, 0, 1.18], // 상단 영점에서 하단 극값으로 내리는 세로 점선 x좌표들
+    "bottom_graph": {
+        "functions": [{"expr": "-(x**2 - 1.4)**2 + 1.96", "color": "blue", "label": "g(x)"}],
+        "points": [
+            {"x": -1.9, "label": "a1", "sub_label": "= a"},
+            {"x": -1.0, "label": "a2"},
+            {"x": 0.0, "label": "0"},
+            {"x": 1.0, "label": "a3"},
+            {"x": 1.9, "label": "a4"}
+        ],
+        "rectangle": {"x1": -1.6, "y1": 0, "x2": 1.6, "y2": 1.5, "color": "green"},
+        "hatching": {"x_min": -1.6, "x_max": 1.6, "color": "red"},
+        "notes": [{"x": 1.5, "text": "m = 4"}]
+    }
+}
+
+2. "coordinate_plane" (단일 좌표평면, 함수 그래프, 이차함수, 삼각함수, 정적분 넓이 등):
 {
     "diagram_type": "coordinate_plane",
-    "title": "그래프 소제목 (예: y = x^2 - 4x + 3)",
+    "title": "y = x^2 - 4x + 3",
     "x_range": [-1, 5],
     "y_range": [-2, 6],
-    "functions": [
-        {"expr": "x**2 - 4*x + 3", "color": "blue", "label": "y = f(x)"}
-    ],
-    "points": [
-        {"x": 2, "y": -1, "label": "(2, -1)", "dashed": true},
-        {"x": 1, "y": 0, "label": "1"},
-        {"x": 3, "y": 0, "label": "3"}
-    ],
-    "shaded_region": { "x_min": 1, "x_max": 3, "y_lower": "0", "y_upper": "x**2 - 4*x + 3" } // 적분/둘러싸인 영역 시
+    "functions": [{"expr": "x**2 - 4*x + 3", "color": "blue", "label": "y = f(x)"}],
+    "points": [{"x": 2, "y": -1, "label": "(2, -1)", "dashed": true}],
+    "shaded_region": {"x_min": 1, "x_max": 3, "y_lower": "0", "y_upper": "x**2 - 4*x + 3"}
 }
-* expr 작성 시 Python/NumPy 문법을 사용하세요 (예: x**2 - 4*x + 3, 2*x + 1, np.sin(x), -(x-2)**2 + 4 등). color는 "blue", "red", "black" 지원.
 
-2. "number_line" (일차/이차 부등식의 해 영역, 수의 범위 등):
+3. "number_line" (부등식의 해 영역, 수의 범위 등):
 {
     "diagram_type": "number_line",
     "title": "부등식의 해 영역",
     "x_range": [-2, 6],
-    "intervals": [
-        {"start": 1, "end": 4, "start_closed": false, "end_closed": true, "label": "1 < x <= 4"}
-    ]
+    "intervals": [{"start": 1, "end": 4, "start_closed": false, "end_closed": true, "label": "1 < x <= 4"}]
 }
 
-3. "geometry" (삼각형, 사각형, 원 등 기하 문제):
+4. "geometry" (삼각형, 사각형, 원 등 기하 문제):
 {
     "diagram_type": "geometry",
     "shape": "triangle",
@@ -123,7 +149,7 @@ def solve_problem_with_gemini(
     "labels": {"A": "A", "B": "B", "C": "C", "c": "빗변", "angle_B": "90°"}
 }
 
-4. "venn" (집합 연산, 포함 관계, 합집합/교집합 등):
+5. "venn" (집합 연산, 포함 관계, 합집합/교집합 등):
 {
     "diagram_type": "venn",
     "title": "집합 A, B의 연산",
@@ -131,11 +157,35 @@ def solve_problem_with_gemini(
     "highlight": "intersection"
 }
 
-* 순수 단순 텍스트 풀이만으로 충분하고 시각적 요소가 전혀 불필요한 경우에만 "has_diagram": false, "diagram": null 로 지정하세요. 그 외 함수, 부등식, 기하, 집합 등 조금이라도 시각화가 유익하면 무조건 diagram을 포함하세요!
+반드시 아래 JSON 형식으로만 응답해주세요. 마크다운 ```json ... ``` 태그 없이 순수 JSON 문자열만 출력하세요:
+{
+    "problem_title": "문제 유형이나 소제목",
+    "problem_summary": "인식한 문제 내용 한두 줄 요약",
+    "has_diagram": true,
+    "diagram": {
+        "diagram_type": "dual_graph"
+    },
+    "steps": [
+        "단계별 실전 수식 1줄",
+        "단계별 실전 수식 2줄"
+    ],
+    "final_answer": "최종 정답 단답형 값",
+    "tip": "실전 킬러 핵심 포인트 팁"
+}
+"""
+        else:
+            prompt = """
+당신은 친절하고 꼼꼼한 수학/과학/논리학 과외 선생님입니다.
+업로드된 문제집/교재 사진 속 문제를 파악하고, 학생이 공책에 적어둔 것처럼 친근하고 명확한 손글씨 풀이 노트를 작성해야 합니다.
+손글씨 필기용이므로 각 단계는 한두 줄 이내로 깔끔하게 정리해주시고, 복잡한 LaTeX 대신 공책에 손글씨로 적기 편한 명확한 기호(예: +, -, *, /, ^2, =>, <=>, v, ^, ~ 등)를 주로 사용해주세요.
+
+[★ 시각적 그래프 및 다이어그램 적극 활용 지침 ★]
+학생들의 직관적 이해를 돕기 위해, 문제가 함수, 부등식, 기하, 집합, 확률 등 시각화가 가능한 경우 반드시 적극적으로 "has_diagram": true와 함께 "diagram" 객체를 작성해주세요.
+시스템의 손글씨 다이어그램 엔진이 이를 학생이 펜으로 직접 그린 듯한 자연스러운 스케치로 자동 렌더링합니다.
 
 반드시 아래 JSON 형식으로만 응답해주세요. 마크다운 ```json ... ``` 태그 없이 순수 JSON 문자열만 출력하세요:
 {
-    "problem_title": "문제 유형이나 소제목 (예: 이차함수의 최솟값과 그래프)",
+    "problem_title": "문제 유형이나 소제목",
     "problem_summary": "인식한 문제 내용 한두 줄 요약",
     "has_diagram": true,
     "diagram": {
@@ -143,23 +193,18 @@ def solve_problem_with_gemini(
         "title": "y = x^2 - 4x + 3",
         "x_range": [-1, 5],
         "y_range": [-2, 6],
-        "functions": [
-            {"expr": "x**2 - 4*x + 3", "color": "blue", "label": "y = f(x)"}
-        ],
-        "points": [
-            {"x": 2, "y": -1, "label": "(2, -1)", "dashed": true}
-        ]
+        "functions": [{"expr": "x**2 - 4*x + 3", "color": "blue", "label": "y = f(x)"}],
+        "points": [{"x": 2, "y": -1, "label": "(2, -1)", "dashed": true}]
     },
     "steps": [
-        "1. 단계별 풀이 첫 번째 줄",
-        "   상세 계산 과정 및 식",
-        "2. 두 번째 단계",
-        "   상세 계산 과정"
+        "1. 첫 번째 단계 상세 풀이",
+        "2. 두 번째 단계 상세 풀이"
     ],
     "final_answer": "최종 정답 또는 결론",
     "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트"
 }
 """
+
 
         # 기본 우선순위 모델 목록 (최고 성능 플래그십 순서)
         base_priority = [

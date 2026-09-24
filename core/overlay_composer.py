@@ -7,7 +7,7 @@ import random
 from typing import Dict, Any, Tuple, Optional, List
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
-from .handwriting_engine import HandwritingEngine
+from .handwriting_engine import HandwritingEngine, PEN_STYLES
 from .diagram_engine import HandwrittenDiagramEngine
 
 POSTIT_COLORS = {
@@ -70,6 +70,52 @@ class OverlayComposer:
     def __init__(self, engine: HandwritingEngine):
         self.engine = engine
         self.diagram_engine = HandwrittenDiagramEngine(engine)
+
+    def _draw_ans_circle_if_exists(
+        self,
+        img: Image.Image,
+        lines: List[str],
+        ans: str,
+        start_pos: Tuple[int, int],
+        font_name: str,
+        font_size: int,
+        line_spacing: int,
+        pen_style: str
+    ) -> Image.Image:
+        """최종 정답 텍스트가 위치한 영역을 찾아 자연스러운 손글씨 타원 동그라미를 둘러줍니다."""
+        if not ans or not str(ans).strip():
+            return img
+        ans_clean = str(ans).strip()
+        target_idx = -1
+        for idx, l in enumerate(lines):
+            if f"정답: {ans_clean}" in l or (f"정답" in l and ans_clean in l):
+                target_idx = idx
+                break
+        if target_idx == -1:
+            return img
+
+        line_y = start_pos[1] + target_idx * (font_size + line_spacing)
+        font = self.engine.load_font(font_name, font_size)
+
+        target_line = lines[target_idx]
+        parts = target_line.split(ans_clean, 1)
+        prefix = parts[0]
+        san_prefix = self.engine.sanitize_math_text(prefix, font_name)
+        san_ans = self.engine.sanitize_math_text(ans_clean, font_name)
+
+        p_box = font.getbbox(san_prefix)
+        prefix_w = (p_box[2] - p_box[0]) if p_box else 0
+        a_box = font.getbbox(san_ans)
+        ans_w = max(24, (a_box[2] - a_box[0])) if a_box else 32
+
+        x1 = start_pos[0] + prefix_w
+        y1 = line_y
+        x2 = x1 + ans_w
+        y2 = y1 + font_size
+
+        style = PEN_STYLES.get(pen_style, list(PEN_STYLES.values())[0])
+        pen_color = style["color"]
+        return self.engine.draw_answer_circle(img, bbox=(x1, y1, x2, y2), color=pen_color, width=2)
 
     def compose_margin_mode(
         self,
@@ -194,6 +240,16 @@ class OverlayComposer:
             diag_x = target_w - diag_img.width - 50
             diag_y = start_y + 8
             result.alpha_composite(diag_img, (diag_x, diag_y))
+            result = self._draw_ans_circle_if_exists(
+                img=result,
+                lines=lines_to_draw,
+                ans=ans,
+                start_pos=(start_x, start_y),
+                font_name=font_name,
+                font_size=font_size,
+                line_spacing=line_spacing,
+                pen_style=pen_style
+            )
             return result.convert("RGB")
         elif diag_img is not None:
             title_lines = []
@@ -225,15 +281,26 @@ class OverlayComposer:
                 remaining_lines.append("")
                 remaining_lines.extend(self.engine.wrap_text(f"★ 핵심 Tip: {tip}", font_name, font_size, max_wrap_w))
                 
+            rem_start_y = int(diag_y + diag_img.height + 18)
             result, end_pos = self.engine.draw_handwritten_text(
                 base_img=result,
                 text_lines=remaining_lines,
-                start_pos=(start_x, diag_y + diag_img.height + 18),
+                start_pos=(start_x, rem_start_y),
                 font_name=font_name,
                 font_size=font_size,
                 pen_style_name=pen_style,
                 line_spacing=line_spacing,
                 apply_jitter=True
+            )
+            result = self._draw_ans_circle_if_exists(
+                img=result,
+                lines=remaining_lines,
+                ans=ans,
+                start_pos=(start_x, rem_start_y),
+                font_name=font_name,
+                font_size=font_size,
+                line_spacing=line_spacing,
+                pen_style=pen_style
             )
             return result.convert("RGB")
         else:
@@ -247,7 +314,18 @@ class OverlayComposer:
                 line_spacing=line_spacing,
                 apply_jitter=True
             )
+            result = self._draw_ans_circle_if_exists(
+                img=result,
+                lines=lines_to_draw,
+                ans=ans,
+                start_pos=(start_x, start_y),
+                font_name=font_name,
+                font_size=font_size,
+                line_spacing=line_spacing,
+                pen_style=pen_style
+            )
             return result.convert("RGB")
+
 
     def compose_postit_mode(
         self,
@@ -346,27 +424,50 @@ class OverlayComposer:
                 remaining_lines.append("")
                 remaining_lines.extend(self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, wrap_w))
 
+            rem_pos = (30, int(diag_y + diag_img.height + 15))
             postit_with_text, end_pos = self.engine.draw_handwritten_text(
                 base_img=postit_with_text,
                 text_lines=remaining_lines,
-                start_pos=(30, int(diag_y + diag_img.height + 15)),
+                start_pos=rem_pos,
                 font_name=font_name,
                 font_size=font_size,
                 pen_style_name=pen_style,
                 line_spacing=line_spacing,
                 apply_jitter=True
             )
+            postit_with_text = self._draw_ans_circle_if_exists(
+                img=postit_with_text,
+                lines=remaining_lines,
+                ans=ans,
+                start_pos=rem_pos,
+                font_name=font_name,
+                font_size=font_size,
+                line_spacing=line_spacing,
+                pen_style=pen_style
+            )
         else:
+            base_pos = (30, tape_h + 20)
             postit_with_text, end_pos = self.engine.draw_handwritten_text(
                 base_img=postit,
                 text_lines=lines_to_draw,
-                start_pos=(30, tape_h + 20),
+                start_pos=base_pos,
                 font_name=font_name,
                 font_size=font_size,
                 pen_style_name=pen_style,
                 line_spacing=line_spacing,
                 apply_jitter=True
             )
+            postit_with_text = self._draw_ans_circle_if_exists(
+                img=postit_with_text,
+                lines=lines_to_draw,
+                ans=ans,
+                start_pos=base_pos,
+                font_name=font_name,
+                font_size=font_size,
+                line_spacing=line_spacing,
+                pen_style=pen_style
+            )
+
 
         # 그림자 및 자연스러운 미세 회전
         angle = random.uniform(-1.0, 1.0)
@@ -523,27 +624,50 @@ class OverlayComposer:
                 remaining_lines.append("")
                 remaining_lines.extend(self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, wrap_w))
 
+            rem_pos = (orig_w + 35, int(diag_y + diag_img.height + 16))
             result_with_text, end_pos = self.engine.draw_handwritten_text(
                 base_img=result_with_text,
                 text_lines=remaining_lines,
-                start_pos=(orig_w + 35, int(diag_y + diag_img.height + 16)),
+                start_pos=rem_pos,
                 font_name=font_name,
                 font_size=font_size,
                 pen_style_name=pen_style,
                 line_spacing=line_spacing,
                 apply_jitter=True
+            )
+            result_with_text = self._draw_ans_circle_if_exists(
+                img=result_with_text,
+                lines=remaining_lines,
+                ans=ans,
+                start_pos=rem_pos,
+                font_name=font_name,
+                font_size=font_size,
+                line_spacing=line_spacing,
+                pen_style=pen_style
             )
             return result_with_text.convert("RGB")
         else:
+            base_pos = (orig_w + 35, 40)
             result_with_text, end_pos = self.engine.draw_handwritten_text(
                 base_img=result,
                 text_lines=lines_to_draw,
-                start_pos=(orig_w + 35, 40),
+                start_pos=base_pos,
                 font_name=font_name,
                 font_size=font_size,
                 pen_style_name=pen_style,
                 line_spacing=line_spacing,
                 apply_jitter=True
             )
+            result_with_text = self._draw_ans_circle_if_exists(
+                img=result_with_text,
+                lines=lines_to_draw,
+                ans=ans,
+                start_pos=base_pos,
+                font_name=font_name,
+                font_size=font_size,
+                line_spacing=line_spacing,
+                pen_style=pen_style
+            )
             return result_with_text.convert("RGB")
+
 
