@@ -84,19 +84,30 @@ def solve_problem_with_gemini(
     "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트"
 }
 """
-        # gemini-2.5-flash 모델 사용
+        # 최신 고성능 gemini-3.8-flash 모델 사용
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
             temperature=0.2
         )
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                prompt
-            ],
-            config=config
-        )
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    prompt
+                ],
+                config=config
+            )
+        except Exception:
+            # 3.8 미지원 계정/지역일 경우 2.5-flash 자동 호환
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    prompt
+                ],
+                config=config
+            )
         
         text_output = response.text.strip()
         # 혹시 ```json 마크다운이 붙어있다면 제거
