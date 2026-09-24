@@ -14,6 +14,12 @@ from core.gemini_solver import solve_problem_with_gemini, MOCK_SOLUTIONS
 import download_fonts
 import create_sample_image
 
+try:
+    from streamlit_paste_button import paste_image_button
+except ImportError:
+    paste_image_button = None
+
+
 # 페이지 기본 설정
 st.set_page_config(
     page_title="AI 손글씨 문제집 풀이 노트",
@@ -132,35 +138,57 @@ st.markdown(
 col_upload, col_preview = st.columns([1, 1], gap="medium")
 
 with col_upload:
-    st.subheader("1. 문제집 사진 올리기")
+    st.subheader("1. 문제집 사진 올리기 / 캡처 붙여넣기")
     
-    use_sample_btn = st.button("📄 기본 샘플 문제집 불러오기", use_container_width=True)
-    
+    col_p, col_s = st.columns([1.2, 1], gap="small")
+    with col_p:
+        if paste_image_button is not None:
+            paste_result = paste_image_button(
+                label="📋 캡처 붙여넣기 (Ctrl+V)",
+                background_color="#1E88E5",
+                hover_background_color="#1565C0",
+                errors="ignore",
+                key="clipboard_paste_btn"
+            )
+        else:
+            paste_result = None
+    with col_s:
+        use_sample_btn = st.button("📄 샘플 문제 불러오기", use_container_width=True)
+
     uploaded_file = st.file_uploader(
         "또는 직접 사진을 업로드하세요 (JPG, PNG)",
         type=["jpg", "jpeg", "png"]
     )
     
-    # 이미지 로드
-    current_image = None
-    image_bytes = None
-    
-    if uploaded_file is not None:
-        current_image = Image.open(uploaded_file).convert("RGB")
-        image_bytes = uploaded_file.getvalue()
+    # 클립보드 캡처, 업로드, 샘플 순차 처리
+    if paste_result and paste_result.image_data is not None:
+        buf = io.BytesIO()
+        paste_result.image_data.convert("RGB").save(buf, format="PNG")
+        st.session_state["active_img_bytes"] = buf.getvalue()
+        st.session_state["source_type"] = "clipboard"
+        st.toast("📋 클립보드 캡처 이미지를 성공적으로 가져왔습니다!", icon="✅")
+    elif uploaded_file is not None:
+        st.session_state["active_img_bytes"] = uploaded_file.getvalue()
         st.session_state["source_type"] = "uploaded"
-    elif use_sample_btn or "source_type" in st.session_state:
+    elif use_sample_btn or ("source_type" in st.session_state and "active_img_bytes" not in st.session_state):
         if os.path.exists(sample_img_path):
-            current_image = Image.open(sample_img_path).convert("RGB")
             with open(sample_img_path, "rb") as f:
-                image_bytes = f.read()
+                st.session_state["active_img_bytes"] = f.read()
             st.session_state["source_type"] = "sample"
 
+    current_image = None
+    image_bytes = st.session_state.get("active_img_bytes", None)
+    if image_bytes:
+        try:
+            current_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        except Exception:
+            current_image = None
+
     if current_image:
-        st.image(current_image, caption="선택된 원본 문제집 이미지", use_container_width=True)
+        st.image(current_image, caption="선택/캡처된 문제집 이미지", use_container_width=True)
         generate_btn = st.button("🚀 손글씨 풀이 작성 시작!", type="primary", use_container_width=True)
     else:
-        st.info("위에서 사진을 업로드하거나 [기본 샘플 문제집 불러오기]를 눌러주세요.")
+        st.info("💡 캡처 도구(Win + Shift + S)로 화면을 캡처한 뒤 **[📋 캡처 붙여넣기]** 버튼을 누르시거나, 사진 파일을 업로드해주세요.")
         generate_btn = False
 
 with col_preview:
