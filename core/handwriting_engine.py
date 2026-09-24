@@ -126,6 +126,81 @@ MATH_FALLBACK_MAP = {
 }
 
 
+import re
+
+def clean_latex_to_handwriting(text: str) -> str:
+    """
+    AI가 생성한 LaTeX 원시 수식이나 마크다운 기호를
+    사람이 공책에 손글씨로 적는 직관적인 자연스러운 수식 표현으로 자동 변환합니다.
+    """
+    if not text:
+        return ""
+    
+    s = str(text).strip()
+    if s.startswith("`") and s.endswith("`"):
+        s = s[1:-1].strip()
+    
+    # 1. 분수 변환: \frac{a}{b}, \dfrac{a}{b} -> (a/b)
+    for _ in range(4):
+        s = re.sub(r'\\d?frac\{([^{}]+)\}\{([^{}]+)\}', r'(\1/\2)', s)
+    
+    # 2. 사칙연산 및 특수 연산자
+    s = re.sub(r'\\times\b', ' * ', s)
+    s = re.sub(r'\\div\b', ' / ', s)
+    s = re.sub(r'\\cdot\b', ' * ', s)
+    s = re.sub(r'\\pm\b', '+/-', s)
+    s = re.sub(r'\\mp\b', '-/+', s)
+    
+    # 3. 집합 / 범위 기호
+    s = re.sub(r'\\in\s*\\mathbb\{N\}', ' in 자연수', s)
+    s = re.sub(r'\\in\s*\\mathbb\{R\}', ' in 실수', s)
+    s = re.sub(r'\\in\s*\\mathbb\{Z\}', ' in 정수', s)
+    s = re.sub(r'\\mathbb\{N\}', '자연수', s)
+    s = re.sub(r'\\mathbb\{R\}', '실수', s)
+    s = re.sub(r'\\mathbb\{Z\}', '정수', s)
+    s = re.sub(r'\\in\b', ' in ', s)
+    s = re.sub(r'\\notin\b', ' not in ', s)
+    s = re.sub(r'\\subset\b', ' subset ', s)
+    
+    # 4. 부등호 및 화살표
+    s = re.sub(r'\\le(q)?\b', '<=', s)
+    s = re.sub(r'\\ge(q)?\b', '>=', s)
+    s = re.sub(r'\\ne(q)?\b', '!=', s)
+    s = re.sub(r'\\approx\b', '≒', s)
+    s = re.sub(r'\\equiv\b', '≡', s)
+    s = re.sub(r'\\Rightarrow\b', '=>', s)
+    s = re.sub(r'\\Leftarrow\b', '<=', s)
+    s = re.sub(r'\\Leftrightarrow\b', '<=>', s)
+    s = re.sub(r'\\rightarrow\b', '->', s)
+    s = re.sub(r'\\leftarrow\b', '<-', s)
+    s = re.sub(r'\\to\b', '->', s)
+    
+    # 5. 첨자: a_{n+1} -> a_(n+1)
+    s = re.sub(r'_\{([^{}]+)\}', r'_(\1)', s)
+    s = re.sub(r'\^\{([^{}]+)\}', r'^(\1)', s)
+    
+    # 6. 수학 함수
+    s = re.sub(r'\\sqrt\{([^{}]+)\}', r'루트(\1)', s)
+    s = re.sub(r'\\sqrt\b', '루트', s)
+    s = re.sub(r'\\log\b', 'log', s)
+    s = re.sub(r'\\ln\b', 'ln', s)
+    s = re.sub(r'\\sin\b', 'sin', s)
+    s = re.sub(r'\\cos\b', 'cos', s)
+    s = re.sub(r'\\tan\b', 'tan', s)
+    s = re.sub(r'\\cdots\b', '...', s)
+    s = re.sub(r'\\dots\b', '...', s)
+    
+    # 7. 텍스트 래퍼 및 불필요 기호
+    s = re.sub(r'\\text\{([^{}]+)\}', r'\1', s)
+    s = re.sub(r'\\mathrm\{([^{}]+)\}', r'\1', s)
+    s = re.sub(r'\\mathbf\{([^{}]+)\}', r'\1', s)
+    s = s.replace(r'\{', '{').replace(r'\}', '}')
+    s = re.sub(r'\\([a-zA-Z]+)', r'\1', s)
+    s = s.replace('$', '')
+    s = re.sub(r'  +', ' ', s)
+    return s.strip()
+
+
 class HandwritingEngine:
     def __init__(self, fonts_dir: str = "fonts"):
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -136,11 +211,39 @@ class HandwritingEngine:
 
     def get_font_path(self, font_name: str) -> Optional[str]:
         filename = FONT_MAP.get(font_name, font_name)
-        filepath = os.path.join(self.fonts_dir, filename)
-        if os.path.exists(filepath):
-            return filepath
-        if self.system_fallback_path:
-            return self.system_fallback_path
+        
+        # 1. 지정된 폰트 파일 직접 확인
+        if os.path.exists(self.fonts_dir):
+            filepath = os.path.join(self.fonts_dir, filename)
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 1000:
+                return filepath
+            
+            # 2. 대소문자 무시 매칭
+            for f in os.listdir(self.fonts_dir):
+                if f.lower() == filename.lower():
+                    cand = os.path.join(self.fonts_dir, f)
+                    if os.path.getsize(cand) > 1000:
+                        return cand
+            
+            # 3. fonts_dir에 있는 아무 한글 TTF 폰트나 폴백
+            for f in os.listdir(self.fonts_dir):
+                if f.endswith(".ttf"):
+                    cand = os.path.join(self.fonts_dir, f)
+                    if os.path.getsize(cand) > 50000:
+                        return cand
+                        
+        # 4. 리눅스 / 윈도우 시스템 한글 폰트 폴백
+        system_candidates = [
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "C:/Windows/Fonts/malgun.ttf",
+            "C:/Windows/Fonts/NanumGothic.ttf"
+        ]
+        for sc in system_candidates:
+            if os.path.exists(sc):
+                return sc
+                
         return None
 
     def get_font_cmap(self, font_name: str) -> set:
@@ -178,25 +281,43 @@ class HandwritingEngine:
             except Exception as e:
                 print(f"[!] 폰트 로드 실패 ({path}): {e}")
         
-        font = ImageFont.load_default()
-        self._font_cache[cache_key] = font
-        return font
+        # fonts 디렉토리 내의 아무 TTF라도 시도
+        if os.path.exists(self.fonts_dir):
+            for f in os.listdir(self.fonts_dir):
+                if f.endswith(".ttf"):
+                    cand = os.path.join(self.fonts_dir, f)
+                    try:
+                        font = ImageFont.truetype(cand, size)
+                        self._font_cache[cache_key] = font
+                        return font
+                    except Exception:
+                        pass
+        
+        # load_default()는 캐시하지 않음
+        return ImageFont.load_default()
 
     def font_supports_char(self, font_name: str, char: str) -> bool:
-        """폰트가 해당 문자를 진짜로 지원하는지 cmap으로 엄밀하게 확인합니다."""
+        """폰트가 해당 문자를 진짜로 지원하는지 확인합니다. 한글 음절은 항상 True로 보존합니다."""
+        cp = ord(char)
+        # 한글 음절(가-힣) 및 한글 자모는 절대 미지원 처리하지 않음
+        if 0xAC00 <= cp <= 0xD7A3 or 0x3131 <= cp <= 0x318E:
+            return True
         cmap = self.get_font_cmap(font_name)
         if not cmap:
             return True
-        return ord(char) in cmap
+        return cp in cmap
 
     def sanitize_math_text(self, text: str, font_name: str) -> str:
         """
-        선택된 손글씨 폰트에서 미지원(누락)되는 수학/그리스 기호를
+        선택된 손글씨 폰트에서 미지원(누락)되는 특수 수학 기호를
         자연스러운 대체 문자로 변환하여 글자 깨짐(□)을 원천 방지합니다.
         """
         cleaned = []
         for ch in text:
             if ch in [" ", "\n", "\t"]:
+                cleaned.append(ch)
+            elif 0xAC00 <= ord(ch) <= 0xD7A3 or 0x3131 <= ord(ch) <= 0x318E:
+                # 한글은 100% 보존
                 cleaned.append(ch)
             elif ch in MATH_FALLBACK_MAP:
                 if not self.font_supports_char(font_name, ch):
@@ -212,8 +333,9 @@ class HandwritingEngine:
 
     def wrap_text(self, text: str, font_name: str, font_size: int, max_width: int) -> List[str]:
         """지정된 최대 너비에 맞게 텍스트를 줄바꿈합니다 (단어가 길거나 수식인 경우 글자 단위 분할로 절대 잘리지 않음)."""
+        cleaned_text = clean_latex_to_handwriting(text)
         font = self.load_font(font_name, font_size)
-        sanitized = self.sanitize_math_text(text, font_name)
+        sanitized = self.sanitize_math_text(cleaned_text, font_name)
         lines = []
         for raw_line in sanitized.split("\n"):
             if not raw_line.strip():
@@ -281,7 +403,8 @@ class HandwritingEngine:
         max_x = curr_x
 
         for line in text_lines:
-            line_sanitized = self.sanitize_math_text(line, font_name)
+            line_cleaned = clean_latex_to_handwriting(line)
+            line_sanitized = self.sanitize_math_text(line_cleaned, font_name)
             if not line_sanitized.strip():
                 curr_y += font_size + line_spacing
                 continue

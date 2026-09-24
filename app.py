@@ -45,7 +45,6 @@ st.set_page_config(
 download_fonts.download_fonts()
 
 # 엔진 초기화
-@st.cache_resource
 def get_composer():
     engine = HandwritingEngine(fonts_dir="fonts")
     composer = OverlayComposer(engine)

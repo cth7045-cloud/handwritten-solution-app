@@ -168,6 +168,12 @@ def solve_problem_with_gemini(
     "highlight": "intersection"
 }
 
+[★ 손글씨 필기용 수식 작성 절대 규칙 (LaTeX 금지) ★]
+- 이것은 사람이 공책/시험지 여백에 펜으로 손글씨를 적는 풀이 노트입니다.
+- 절대로 \\frac{1}{3}, \\times, \\in, \\mathbb{N}, \\sqrt 등 LaTeX 원시 명령어를 출력하지 마세요!
+- 분수는 (1/3), 곱하기는 *, 소속은 in 자연수, 제곱근은 루트 등으로 사람이 직접 손으로 쓰듯 직관적이고 친근하게 작성하세요.
+- 불필요한 LaTeX 중괄호({})나 달러($) 기호도 일체 쓰지 마세요.
+
 반드시 아래 JSON 형식으로만 응답해주세요. 마크다운 ```json ... ``` 태그 없이 순수 JSON 문자열만 출력하세요:
 {
     "problem_title": "문제 유형이나 소제목",
@@ -189,6 +195,10 @@ def solve_problem_with_gemini(
 당신은 친절하고 꼼꼼한 수학/과학/논리학 과외 선생님입니다.
 업로드된 문제집/교재 사진 속 문제를 파악하고, 학생이 공책에 적어둔 것처럼 친근하고 명확한 손글씨 풀이 노트를 작성해야 합니다.
 손글씨 필기용이므로 각 단계는 한두 줄 이내로 깔끔하게 정리해주시고, 복잡한 LaTeX 대신 공책에 손글씨로 적기 편한 명확한 기호(예: +, -, *, /, ^2, =>, <=>, v, ^, ~ 등)를 주로 사용해주세요.
+
+[★ 손글씨 필기용 수식 작성 절대 규칙 (LaTeX 금지) ★]
+절대로 \\frac, \\times, \\in, \\mathbb, \\sqrt 등 LaTeX 코드를 쓰지 마세요!
+사람이 공책에 손으로 적는 것처럼 (1/3), *, in, 자연수 등으로 친근하고 읽기 쉽게 작성하세요.
 
 [★ 시각적 그래프 및 다이어그램 적극 활용 지침 ★]
 학생들의 직관적 이해를 돕기 위해, 문제가 함수, 부등식, 기하, 집합, 확률 등 시각화가 가능한 경우 반드시 적극적으로 "has_diagram": true와 함께 "diagram" 객체를 작성해주세요.
@@ -216,17 +226,13 @@ def solve_problem_with_gemini(
 }
 """
 
-
-        # 기본 우선순위 모델 목록 (최고 성능 플래그십 순서)
+        # 기본 우선순위 모델 목록 (실제 존재하는 최신 초고속 비전 플래그십 순서)
         base_priority = [
-            "gemini-3.8-flash",
-            "gemini-3.1-pro-preview",
-            "gemini-3.7-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-2.5-pro",
             "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-2.5-pro",
+            "gemini-1.5-pro",
         ]
         
         # 키에 활성화된 모델 목록 동적 조회 시도
@@ -239,11 +245,11 @@ def solve_problem_with_gemini(
                     active_from_api.append(m_name)
             
             if active_from_api:
-                # base_priority에 있는 것 중 활성화된 것을 우선 순서대로 배치
-                ordered = [m for m in base_priority if m in active_from_api]
-                # 그 외 활성화된 최신 모델도 뒤에 추가 (구형 2.0 및 1.x 제외)
+                # 3.x 모델이 API 목록에 실제로 존재하면 최우선 배치
+                v3_models = [m for m in active_from_api if "gemini-3" in m]
+                ordered = v3_models + [m for m in base_priority if m in active_from_api]
                 for m in active_from_api:
-                    if m not in ordered and not m.startswith("gemini-2.0") and not m.startswith("gemini-1."):
+                    if m not in ordered and not m.startswith("gemini-1."):
                         ordered.append(m)
                 if ordered:
                     candidate_models = ordered
