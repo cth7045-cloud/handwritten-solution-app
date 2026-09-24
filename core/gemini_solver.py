@@ -84,13 +84,18 @@ def solve_problem_with_gemini(
     "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트"
 }
 """
-        # gemini-3.8-flash 모델 사용
+        # gemini-2.5-flash 모델 사용
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.2
+        )
         response = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-2.5-flash",
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 prompt
-            ]
+            ],
+            config=config
         )
         
         text_output = response.text.strip()

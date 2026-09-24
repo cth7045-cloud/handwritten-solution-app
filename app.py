@@ -61,18 +61,32 @@ with st.sidebar:
         except Exception:
             pass
     
+    # 환경변수 또는 Streamlit secrets에서 API 키 자동 감지
+    stored_key = os.environ.get("GEMINI_API_KEY", "")
+    try:
+        if not stored_key and "GEMINI_API_KEY" in st.secrets:
+            stored_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass
+
     st.subheader("🔑 Gemini API 설정")
-    use_mock = st.checkbox("샘플 모드로 바로 테스트하기 (키 불필요)", value=True)
+    default_mock = False if stored_key else True
+    use_mock = st.checkbox("샘플 모드로 바로 테스트하기 (키 불필요)", value=default_mock)
     
-    api_key_input = ""
+    api_key_input = stored_key
     if not use_mock:
         api_key_input = st.text_input(
             "Gemini API Key (무료)",
+            value=stored_key,
             type="password",
             placeholder="AI Studio에서 발급받은 무료 키 입력",
             help="Google AI Studio(aistudio.google.com)에서 무료로 즉시 발급 가능합니다."
         )
-        st.caption("👉 [Google AI Studio에서 무료 키 받기](https://aistudio.google.com/)")
+        if api_key_input:
+            st.success("✅ Gemini API 키가 활성화되었습니다! 진짜 AI가 문제를 풉니다.")
+        else:
+            st.warning("⚠️ 사진 속 진짜 문제를 풀려면 API 키를 입력해주세요.")
+        st.caption("👉 [Google AI Studio에서 무료 키 받기](https://aistudio.google.com/apikey)")
     else:
         st.info("💡 **샘플 모드 활성화됨**: API 키 없이도 손글씨 렌더링과 합성 기능을 바로 확인하실 수 있습니다.")
     
