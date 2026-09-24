@@ -15,7 +15,8 @@ cloudflared.exe
 *.bat
 assets/public_url.txt
 create_shortcut.vbs
-
-# OS generated
+# Database
+data/*.db
+data/
 .DS_Store
 Thumbs.db

@@ -43,12 +43,119 @@ def get_composer():
     composer = OverlayComposer(engine)
     return composer
 
-composer = get_composer()
+from core.auth_manager import (
+    register_user, authenticate_user, get_all_users,
+    update_user_status, increment_solve_count, change_password,
+    get_system_setting, set_system_setting
+)
+
+# ----------------- 로그인 / 회원가입 게이트 -----------------
+if not st.session_state.get("user"):
+    st.markdown("<h1 style='text-align: center;'>✏️ AI 손글씨 문제집 풀이 노트</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #888;'>회원 전용 서비스입니다. 로그인 후 이용해주세요.</p>", unsafe_allow_html=True)
+    st.write("")
+    
+    col_pad1, col_auth, col_pad2 = st.columns([1, 1.8, 1])
+    with col_auth:
+        tab_login, tab_signup = st.tabs(["🔑 로그인", "📝 회원가입"])
+        
+        with tab_login:
+            st.subheader("회원 로그인")
+            login_id = st.text_input("아이디", key="login_id_input")
+            login_pw = st.text_input("비밀번호", type="password", key="login_pw_input")
+            
+            if st.button("로그인", type="primary", use_container_width=True, key="btn_do_login"):
+                ok, user_info, msg = authenticate_user(login_id, login_pw)
+                if ok:
+                    st.session_state["user"] = user_info
+                    st.success(f"{user_info['username']}님, 환영합니다!")
+                    st.rerun()
+                else:
+                    st.error(msg)
+                    
+            st.markdown("---")
+            st.info("👑 **관리자 안내**: 초기 관리자 계정 아이디 `cth7045` (또는 `admin`) / 비밀번호 `admin1234`")
+
+        with tab_signup:
+            st.subheader("신규 회원가입")
+            new_id = st.text_input("희망 아이디 (3자 이상)", key="signup_id_input")
+            new_pw = st.text_input("비밀번호 (4자 이상)", type="password", key="signup_pw_input")
+            new_pw_conf = st.text_input("비밀번호 확인", type="password", key="signup_pw_conf_input")
+            
+            if st.button("가입하기", use_container_width=True, key="btn_do_signup"):
+                if new_pw != new_pw_conf:
+                    st.error("비밀번호가 서로 일치하지 않습니다.")
+                else:
+                    ok, msg = register_user(new_id, new_pw, role="user")
+                    if ok:
+                        st.success(f"{msg} '로그인' 탭으로 이동하여 로그인해주세요.")
+                    else:
+                        st.error(msg)
+                        
+    st.stop()
 
 # ----------------- 사이드바 설정 -----------------
 with st.sidebar:
-    st.title("⚙️ 설정 & 스타일")
+    current_user = st.session_state.get("user") or {}
+    if not current_user:
+        st.stop()
+    is_admin = (current_user.get("role") == "admin")
+    uname = current_user.get("username", "회원")
+    
+    # 상단 사용자 프로필 및 로그아웃
+    col_u, col_lo = st.columns([2.0, 1.2])
+    with col_u:
+        if is_admin:
+            st.markdown(f"👑 **{uname}** `(관리자)`")
+        else:
+            st.markdown(f"👤 **{uname}** 님")
+    with col_lo:
+        if st.button("로그아웃", key="btn_logout", use_container_width=True):
+            st.session_state["user"] = None
+            st.rerun()
+            
     st.markdown("---")
+
+    # 최고 관리자 전용 대시보드
+    if is_admin:
+        with st.expander("👑 최고 관리자 전용 패널", expanded=False):
+            st.markdown("#### 👥 회원 목록 및 관리")
+            all_users = get_all_users()
+            import pandas as pd
+            df_users = pd.DataFrame(all_users)
+            if not df_users.empty:
+                display_df = df_users[["id", "username", "role", "solve_count", "is_active", "created_at"]].copy()
+                display_df.columns = ["번호", "아이디", "등급", "풀이횟수", "상태", "가입일"]
+                display_df["상태"] = display_df["상태"].map({1: "✅ 정상", 0: "🚫 정지"})
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            st.markdown("#### ⚙️ 회원 상태 변경")
+            manageable_users = [u["username"] for u in all_users if u["username"] != uname]
+            if manageable_users:
+                target_u = st.selectbox("대상 회원", manageable_users, key="sel_target_u")
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    if st.button("계정 정상 활성화", key="btn_activate_u", use_container_width=True):
+                        update_user_status(target_u, True)
+                        st.success(f"{target_u} 계정 활성화 완료")
+                        st.rerun()
+                with col_b2:
+                    if st.button("계정 정지", key="btn_deactivate_u", use_container_width=True):
+                        update_user_status(target_u, False)
+                        st.warning(f"{target_u} 계정 정지 완료")
+                        st.rerun()
+
+            st.markdown("#### 🔑 전 회원 공용 API 키 설정")
+            st.caption("관리자가 여기에 키를 넣어두면, 일반 회원은 개인 키 없이도 바로 AI 풀이를 쓸 수 있습니다.")
+            global_k = get_system_setting("GLOBAL_GEMINI_API_KEY", "")
+            new_g_k = st.text_input("공용 API 키", value=global_k, type="password", key="inp_global_key")
+            if st.button("공용 API 키 저장", key="btn_save_global_k", use_container_width=True):
+                set_system_setting("GLOBAL_GEMINI_API_KEY", new_g_k.strip())
+                st.success("공용 API 키가 전역 설정되었습니다!")
+                st.rerun()
+        st.markdown("---")
+
+    st.title("⚙️ 설정 & 스타일")
 
     # 모바일/다른 기기 접속 안내
     public_url_file = os.path.join(os.path.dirname(__file__), "assets", "public_url.txt")
@@ -57,7 +164,7 @@ with st.sidebar:
             with open(public_url_file, "r", encoding="utf-8") as f:
                 mob_url = f.read().strip()
             if mob_url:
-                with st.expander("📱 스마트폰 접속용 QR 코드", expanded=True):
+                with st.expander("📱 스마트폰 접속용 QR 코드", expanded=False):
                     st.caption("스마트폰 카메라로 아래 QR 코드를 비추세요:")
                     import qrcode
                     qr_img = qrcode.make(mob_url)
@@ -77,10 +184,12 @@ with st.sidebar:
         except Exception:
             pass
 
-    # 2. 저장된 키 불러오기 (우선순위: session_state > localStorage > secrets > env > local file)
+    # 2. 저장된 키 불러오기 (우선순위: session_state > localStorage > global_setting > secrets > env)
     stored_key = st.session_state.get("gemini_api_key", "")
     if not stored_key and saved_browser_key:
         stored_key = saved_browser_key
+    if not stored_key:
+        stored_key = get_system_setting("GLOBAL_GEMINI_API_KEY", "")
     if not stored_key:
         try:
             if "GEMINI_API_KEY" in st.secrets:
@@ -278,6 +387,10 @@ with col_preview:
                 
                 st.session_state["result_img"] = result_img
                 st.session_state["solution_data"] = solution_data
+                try:
+                    increment_solve_count(st.session_state["user"]["username"])
+                except Exception:
+                    pass
                 st.success("✨ 손글씨 풀이 완성이 완료되었습니다!")
 
     if "result_img" in st.session_state:
