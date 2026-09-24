@@ -270,9 +270,14 @@ if not st.session_state.get("user"):
         if auto_user:
             st.session_state["user"] = auto_user
             st.session_state["session_token"] = active_token
-            # URL 파라미터 동기화
+            # URL 파라미터 및 쿠키 동기화 (기한 제한 없는 영구 유지)
             if st.query_params.get("session") != active_token:
                 st.query_params["session"] = active_token
+            if cookie_controller:
+                try:
+                    cookie_controller.set("scribenote_session", active_token, max_age=315360000, same_site='lax')
+                except Exception:
+                    pass
         else:
             # 만료되거나 유효하지 않은 세션 삭제
             if "session" in st.query_params:
@@ -313,8 +318,8 @@ if not st.session_state.get("user"):
             login_id = st.text_input("아이디", key="login_id_input", placeholder="아이디를 입력하세요")
             login_pw = st.text_input("비밀번호", type="password", key="login_pw_input", placeholder="비밀번호를 입력하세요")
             
-            # 로그인 상태 유지 체크박스 (기본 활성화)
-            remember_me = st.checkbox("🔒 로그인 상태 유지 (30일간 자동 로그인)", value=True, key="chk_remember_me", help="체크하시면 브라우저를 닫거나 새로고침해도 다시 로그인할 필요 없이 바로 이용하실 수 있습니다.")
+            # 로그인 상태 유지 체크박스 (기본 활성화, 기한 제한 없는 영구 유지)
+            remember_me = st.checkbox("🔒 로그인 상태 유지 (영구 자동 로그인)", value=True, key="chk_remember_me", help="체크하시면 브라우저를 닫거나 컴퓨터를 껐다 켜도 직접 [안전 로그아웃]을 누르기 전까지 영구적으로 로그인 상태가 유지됩니다.")
             
             st.write("")
             if st.button("로그인 후 시작하기", type="primary", use_container_width=True, key="btn_do_login"):
@@ -322,12 +327,12 @@ if not st.session_state.get("user"):
                 if ok:
                     st.session_state["user"] = user_info
                     if remember_me:
-                        new_token = create_session(user_info["username"], days=30)
+                        new_token = create_session(user_info["username"])  # 만료 제한 없는 영구 세션
                         st.session_state["session_token"] = new_token
                         st.query_params["session"] = new_token
                         if cookie_controller:
                             try:
-                                cookie_controller.set("scribenote_session", new_token, max_age=30 * 86400, same_site='lax')
+                                cookie_controller.set("scribenote_session", new_token, max_age=315360000, same_site='lax')
                             except Exception:
                                 pass
                     st.success(f"{user_info['username']}님, 환영합니다!")
@@ -414,7 +419,7 @@ with st.sidebar:
     is_remembered = bool(st.session_state.get("session_token") or st.query_params.get("session"))
     session_badge_html = """
     <div style="margin-top: 8px; font-size: 0.72rem; color: #34d399; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25); padding: 4px 8px; border-radius: 6px; text-align: center; font-weight: 500;">
-        🔒 로그인 상태 유지 중 (30일)
+        🔒 로그인 상태 영구 유지 중
     </div>
     """ if is_remembered else ""
 

@@ -76,6 +76,11 @@ def init_db():
         created_at TEXT NOT NULL
     )
     """)
+    try:
+        # 기존 세션도 기한 제한 없이 영구 유지(9999년)로 일괄 마이그레이션
+        cursor.execute("UPDATE user_sessions SET expires_at = '9999-12-31 23:59:59' WHERE expires_at < '9000-01-01'")
+    except Exception:
+        pass
 
     conn.commit()
     
@@ -236,16 +241,19 @@ def get_user_api_key(username: str) -> str:
         return row["api_key"]
     return ""
 
-def create_session(username: str, days: int = 30) -> str:
-    """새로운 로그인 세션 토큰을 생성하고 DB에 안전하게 저장합니다 (기본 30일)."""
+def create_session(username: str, days: Optional[int] = None) -> str:
+    """새로운 로그인 세션 토큰을 생성하고 DB에 영구 보존합니다 (기간 제한 없음)."""
     token = secrets.token_urlsafe(32)
     now = datetime.now()
-    expires_at = (now + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    if days is not None:
+        expires_at = (now + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        expires_at = "9999-12-31 23:59:59"  # 만료 제한 없는 영구 세션
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     
     conn = get_connection()
     cursor = conn.cursor()
-    # 만료된 세션 자동 정리
+    # 만료된 세션 자동 정리 (영구 세션은 만료되지 않으므로 삭제되지 않음)
     cursor.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now_str,))
     cursor.execute("""
     INSERT INTO user_sessions (token, username, expires_at, created_at)
