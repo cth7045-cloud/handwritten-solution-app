@@ -1,6 +1,6 @@
 """
-문제집 손글씨 풀이 합성 웹 애플리케이션 (Handwritten Solution App)
-Streamlit 기반 인터랙티브 UI
+문제집 손글씨 풀이 합성 웹 애플리케이션 (ScribeNote AI)
+Streamlit 기반 정식 상용 SaaS 스타일 리모델링 UI
 """
 import os
 import io
@@ -22,7 +22,7 @@ except ImportError:
 
 # 페이지 기본 설정
 st.set_page_config(
-    page_title="AI 손글씨 문제집 풀이 노트",
+    page_title="ScribeNote AI | AI 손글씨 해설 솔루션",
     page_icon="✏️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -50,22 +50,209 @@ from core.auth_manager import (
     save_user_api_key, get_user_api_key
 )
 
+# ----------------- 정식 상용 서비스 테마 CSS 주입 -----------------
+CUSTOM_CSS = """
+<style>
+/* 1. 프리미엄 웹 폰트 (Pretendard) */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+
+html, body, [class*="css"], .stMarkdown, .stText, .stButton, input, select, textarea {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
+    letter-spacing: -0.015em;
+}
+
+/* 2. 스트림릿 기본 개발자 요소 은닉 */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header[data-testid="stHeader"] {background: transparent;}
+.stDeployButton {display: none;}
+
+/* 3. 모던 다크 글래스모피즘 배경 */
+.stApp {
+    background: radial-gradient(circle at 50% 0%, #171b30 0%, #0d111e 50%, #07090f 100%) !important;
+    color: #e2e8f0 !important;
+}
+
+/* 4. 상용 서비스 카드 스타일 */
+.saas-card {
+    background: rgba(22, 28, 45, 0.65);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 18px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.35);
+}
+
+.studio-header {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    color: #f1f5f9;
+}
+
+.step-badge {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    color: white;
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 4px 10px;
+    border-radius: 6px;
+    margin-right: 10px;
+    letter-spacing: 0.05em;
+    display: inline-block;
+}
+
+.pro-badge {
+    background: rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    font-size: 0.68rem;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 6px;
+    letter-spacing: 0.05em;
+    vertical-align: middle;
+}
+
+.status-badge-active {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 9999px;
+}
+
+/* 5. 메인 액션 버튼 (그라디언트 + 글로우) */
+div.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
+    color: white !important;
+    font-weight: 700 !important;
+    font-size: 1.05rem !important;
+    border-radius: 12px !important;
+    border: none !important;
+    padding: 0.75rem 1.5rem !important;
+    box-shadow: 0 4px 18px rgba(99, 102, 241, 0.4) !important;
+    transition: all 0.25s ease !important;
+}
+
+div.stButton > button[kind="primary"]:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 24px rgba(99, 102, 241, 0.6) !important;
+}
+
+div.stButton > button[kind="secondary"] {
+    background: rgba(30, 41, 59, 0.7) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    color: #e2e8f0 !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
+}
+
+div.stButton > button[kind="secondary"]:hover {
+    border-color: #6366f1 !important;
+    color: #818cf8 !important;
+    background: rgba(49, 46, 129, 0.4) !important;
+}
+
+/* 6. 사이드바 디자인 */
+[data-testid="stSidebar"] {
+    background: #0b0f19 !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* 7. 탭 바 모던화 */
+div[data-baseweb="tab-list"] {
+    background: rgba(15, 23, 42, 0.5);
+    border-radius: 10px;
+    padding: 4px;
+    gap: 6px;
+}
+
+div[data-baseweb="tab"] {
+    border-radius: 8px;
+    padding: 8px 16px;
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+div[data-baseweb="tab"][aria-selected="true"] {
+    background: #1e293b;
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* 8. 빈 결과 안내 플레이스홀더 */
+.empty-placeholder {
+    border: 2px dashed rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    padding: 48px 24px;
+    text-align: center;
+    background: rgba(15, 23, 42, 0.3);
+}
+
+/* 9. 상세 풀이 단계별 카드 */
+.step-card {
+    background: rgba(30, 41, 59, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-left: 4px solid #6366f1;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 10px;
+    font-size: 0.95rem;
+}
+
+.tip-box {
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-top: 14px;
+    color: #fde68a;
+    font-size: 0.92rem;
+}
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
 # ----------------- 로그인 / 회원가입 게이트 -----------------
 if not st.session_state.get("user"):
-    st.markdown("<h1 style='text-align: center;'>✏️ AI 손글씨 문제집 풀이 노트</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #888;'>회원 전용 서비스입니다. 로그인 후 이용해주세요.</p>", unsafe_allow_html=True)
-    st.write("")
+    # 서비스 소개 상단 히어로 배너
+    st.markdown("""
+    <div style="text-align: center; padding: 40px 10px 20px 10px;">
+        <div style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); padding: 6px 14px; border-radius: 9999px; margin-bottom: 16px;">
+            <span style="font-size: 0.85rem; color: #a5b4fc; font-weight: 700;">✨ 차세대 교육 솔루션</span>
+            <span style="background: #4f46e5; color: white; font-size: 0.65rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">PRO v3.0</span>
+        </div>
+        <h1 style="font-size: 2.5rem; font-weight: 800; margin-bottom: 8px; background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+            ✏️ ScribeNote AI
+        </h1>
+        <p style="font-size: 1.05rem; color: #94a3b8; max-width: 600px; margin: 0 auto 30px auto; line-height: 1.6;">
+            시험지나 문제집을 캡처하면, 최신 플래그십 AI가 문제를 분석하여 <b>진짜 손으로 푼 듯한 고품질 필기 해설 노트</b>를 즉시 합성해 드립니다.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    col_pad1, col_auth, col_pad2 = st.columns([1, 1.8, 1])
+    col_pad1, col_auth, col_pad2 = st.columns([1, 1.4, 1])
     with col_auth:
-        tab_login, tab_signup = st.tabs(["🔑 로그인", "📝 회원가입"])
+        st.markdown('<div class="saas-card" style="padding: 28px;">', unsafe_allow_html=True)
+        tab_login, tab_signup = st.tabs(["🔑 회원 로그인", "📝 신규 회원가입"])
         
         with tab_login:
-            st.subheader("회원 로그인")
-            login_id = st.text_input("아이디", key="login_id_input")
-            login_pw = st.text_input("비밀번호", type="password", key="login_pw_input")
-            
-            if st.button("로그인", type="primary", use_container_width=True, key="btn_do_login"):
+            st.markdown("<p style='font-size: 0.9rem; color: #94a3b8; margin-bottom: 16px;'>등록된 계정으로 로그인하여 나만의 손글씨 풀이 노트를 만드세요.</p>", unsafe_allow_html=True)
+            login_id = st.text_input("아이디", key="login_id_input", placeholder="아이디를 입력하세요")
+            login_pw = st.text_input("비밀번호", type="password", key="login_pw_input", placeholder="비밀번호를 입력하세요")
+            st.write("")
+            if st.button("로그인 후 시작하기", type="primary", use_container_width=True, key="btn_do_login"):
                 ok, user_info, msg = authenticate_user(login_id, login_pw)
                 if ok:
                     st.session_state["user"] = user_info
@@ -75,12 +262,12 @@ if not st.session_state.get("user"):
                     st.error(msg)
 
         with tab_signup:
-            st.subheader("신규 회원가입")
-            new_id = st.text_input("희망 아이디 (2자 이상)", key="signup_id_input")
-            new_pw = st.text_input("비밀번호 (4자 이상)", type="password", key="signup_pw_input")
-            new_pw_conf = st.text_input("비밀번호 확인", type="password", key="signup_pw_conf_input")
-            
-            if st.button("가입하기", use_container_width=True, key="btn_do_signup"):
+            st.markdown("<p style='font-size: 0.9rem; color: #94a3b8; margin-bottom: 16px;'>간단한 아이디와 비밀번호만으로 즉시 가입하실 수 있습니다.</p>", unsafe_allow_html=True)
+            new_id = st.text_input("희망 아이디 (2자 이상)", key="signup_id_input", placeholder="예: student101")
+            new_pw = st.text_input("비밀번호 (4자 이상)", type="password", key="signup_pw_input", placeholder="비밀번호")
+            new_pw_conf = st.text_input("비밀번호 확인", type="password", key="signup_pw_conf_input", placeholder="비밀번호 재입력")
+            st.write("")
+            if st.button("무료 계정 생성하기", use_container_width=True, key="btn_do_signup"):
                 if new_pw != new_pw_conf:
                     st.error("비밀번호가 서로 일치하지 않습니다.")
                 else:
@@ -89,62 +276,127 @@ if not st.session_state.get("user"):
                         st.success(f"{msg} '로그인' 탭으로 이동하여 로그인해주세요.")
                     else:
                         st.error(msg)
-                        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    # 하단 3대 특장점 카드
+    st.markdown("""
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; max-width: 1050px; margin: 40px auto 20px auto;">
+        <div class="saas-card" style="margin-bottom: 0; padding: 20px;">
+            <div style="font-size: 1.6rem; margin-bottom: 8px;">⚡</div>
+            <div style="font-weight: 700; font-size: 1rem; color: #f8fafc; margin-bottom: 6px;">Gemini 3.x Flash 플래그십</div>
+            <div style="font-size: 0.85rem; color: #94a3b8; line-height: 1.5;">최신 멀티모달 추론 엔진이 복잡한 고난도 수식과 논리 기호까지 완벽히 해독하여 정밀 해설을 도출합니다.</div>
+        </div>
+        <div class="saas-card" style="margin-bottom: 0; padding: 20px;">
+            <div style="font-size: 1.6rem; margin-bottom: 8px;">✍️</div>
+            <div style="font-weight: 700; font-size: 1rem; color: #f8fafc; margin-bottom: 6px;">실제 학생 손글씨 렌더링</div>
+            <div style="font-size: 0.85rem; color: #94a3b8; line-height: 1.5;">6종의 자연스러운 필기체 폰트와 흑색 볼펜, 블루 젤펜, 샤프, 채점용 레드펜 질감을 실감 나게 재현합니다.</div>
+        </div>
+        <div class="saas-card" style="margin-bottom: 0; padding: 20px;">
+            <div style="font-size: 1.6rem; margin-bottom: 8px;">📐</div>
+            <div style="font-weight: 700; font-size: 1rem; color: #f8fafc; margin-bottom: 6px;">지능형 맞춤 합성 레이아웃</div>
+            <div style="font-size: 0.85rem; color: #94a3b8; line-height: 1.5;">문제 본문을 가리지 않는 여백 직접 필기, 포스트잇 메모지 부착, 우측 모눈노트 확장 등 3가지 모드를 지원합니다.</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.stop()
 
-# ----------------- 사이드바 설정 -----------------
+
+# ----------------- 로그인 사용자 정보 -----------------
+current_user = st.session_state.get("user") or {}
+if not current_user:
+    st.stop()
+is_admin = (current_user.get("role") == "admin")
+uname = current_user.get("username", "회원")
+
+
+# ----------------- 상단 글로벌 SaaS 네비게이션 헤더 -----------------
+st.markdown(f"""
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 24px; background: rgba(22, 28, 45, 0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; margin-bottom: 24px;">
+    <div style="display: flex; align-items: center; gap: 14px;">
+        <span style="font-size: 1.8rem;">✏️</span>
+        <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.25rem; font-weight: 800; color: #f8fafc; letter-spacing: -0.02em;">ScribeNote AI</span>
+                <span class="pro-badge">PRO ENTERPRISE</span>
+            </div>
+            <div style="font-size: 0.78rem; color: #94a3b8;">수학·과학 문제집 맞춤형 AI 손글씨 해설지 생성 플랫폼</div>
+        </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 14px;">
+        <span class="status-badge-active">● AI 엔진 정상 가동 중 (Gemini 3.x)</span>
+        <div style="background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(255,255,255,0.1); padding: 5px 14px; border-radius: 10px; font-size: 0.85rem; font-weight: 600; color: #f1f5f9;">
+            {'👑' if is_admin else '👤'} {uname} {'(관리자)' if is_admin else '님'}
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ----------------- 사이드바 설정 허브 -----------------
 with st.sidebar:
-    current_user = st.session_state.get("user") or {}
-    if not current_user:
-        st.stop()
-    is_admin = (current_user.get("role") == "admin")
-    uname = current_user.get("username", "회원")
-    
-    # 상단 사용자 프로필 및 로그아웃
-    col_u, col_lo = st.columns([2.0, 1.2])
-    with col_u:
-        if is_admin:
-            st.markdown(f"👑 **{uname}** `(관리자)`")
-        else:
-            st.markdown(f"👤 **{uname}** 님")
-    with col_lo:
-        if st.button("로그아웃", key="btn_logout", use_container_width=True):
-            st.session_state["user"] = None
-            st.rerun()
-            
+    # 1. 회원 프로필 카드
+    st.markdown(f"""
+    <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 16px; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <div style="width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #4f46e5, #7c3aed); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; color: white;">
+                {'👑' if is_admin else '👤'}
+            </div>
+            <div>
+                <div style="font-weight: 700; font-size: 0.95rem; color: #f8fafc;">{uname}</div>
+                <div style="font-size: 0.75rem; color: #94a3b8;">{'최고 관리자 계정' if is_admin else '정회원'}</div>
+            </div>
+        </div>
+        <div style="font-size: 0.75rem; color: #cbd5e1; background: rgba(15, 23, 42, 0.6); padding: 6px 10px; border-radius: 6px; text-align: center;">
+            누적 풀이 횟수: <b>{current_user.get('solve_count', 0)}회</b>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if st.button("로그아웃", key="btn_logout", use_container_width=True):
+        st.session_state["user"] = None
+        st.rerun()
+
     st.markdown("---")
 
-    # 최고 관리자 전용 대시보드
+    # 2. 최고 관리자 전용 대시보드
     if is_admin:
         with st.expander("👑 최고 관리자 전용 패널", expanded=False):
-            st.markdown("#### 👥 회원 목록 및 관리")
+            st.markdown("#### 📊 서비스 운영 현황")
             all_users = get_all_users()
+            total_users = len(all_users)
+            total_solves = sum(u.get("solve_count", 0) for u in all_users)
+            
+            c_k1, c_k2 = st.columns(2)
+            c_k1.metric("총 회원 수", f"{total_users}명")
+            c_k2.metric("총 생성 풀이", f"{total_solves}회")
+            
+            st.markdown("#### 👥 회원 관리")
             import pandas as pd
             df_users = pd.DataFrame(all_users)
             if not df_users.empty:
                 display_df = df_users[["id", "username", "role", "solve_count", "is_active", "created_at"]].copy()
-                display_df.columns = ["번호", "아이디", "등급", "풀이횟수", "상태", "가입일"]
+                display_df.columns = ["번호", "아이디", "등급", "풀이", "상태", "가입일"]
                 display_df["상태"] = display_df["상태"].map({1: "✅ 정상", 0: "🚫 정지"})
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
             
-            st.markdown("#### ⚙️ 회원 상태 변경")
             manageable_users = [u["username"] for u in all_users if u["username"] != uname]
             if manageable_users:
-                target_u = st.selectbox("대상 회원", manageable_users, key="sel_target_u")
+                target_u = st.selectbox("대상 회원 선택", manageable_users, key="sel_target_u")
                 col_b1, col_b2 = st.columns(2)
                 with col_b1:
-                    if st.button("계정 정상 활성화", key="btn_activate_u", use_container_width=True):
+                    if st.button("정상 활성화", key="btn_activate_u", use_container_width=True):
                         update_user_status(target_u, True)
-                        st.success(f"{target_u} 계정 활성화 완료")
+                        st.success(f"{target_u} 활성화 완료")
                         st.rerun()
                 with col_b2:
                     if st.button("계정 정지", key="btn_deactivate_u", use_container_width=True):
                         update_user_status(target_u, False)
-                        st.warning(f"{target_u} 계정 정지 완료")
+                        st.warning(f"{target_u} 정지 완료")
                         st.rerun()
 
             st.markdown("#### 🔑 전 회원 공용 API 키 설정")
-            st.caption("관리자가 여기에 키를 넣어두면, 일반 회원은 개인 키 없이도 바로 AI 풀이를 쓸 수 있습니다.")
+            st.caption("관리자가 등록해두면 모든 회원이 개인 키 없이도 고성능 AI 풀이를 이용할 수 있습니다.")
             global_k = get_system_setting("GLOBAL_GEMINI_API_KEY", "")
             new_g_k = st.text_input("공용 API 키", value=global_k, type="password", key="inp_global_key")
             if st.button("공용 API 키 저장", key="btn_save_global_k", use_container_width=True):
@@ -153,26 +405,7 @@ with st.sidebar:
                 st.rerun()
         st.markdown("---")
 
-    st.title("⚙️ 설정 & 스타일")
-
-    # 모바일/다른 기기 접속 안내
-    public_url_file = os.path.join(os.path.dirname(__file__), "assets", "public_url.txt")
-    if os.path.exists(public_url_file):
-        try:
-            with open(public_url_file, "r", encoding="utf-8") as f:
-                mob_url = f.read().strip()
-            if mob_url:
-                with st.expander("📱 스마트폰 접속용 QR 코드", expanded=False):
-                    st.caption("스마트폰 카메라로 아래 QR 코드를 비추세요:")
-                    import qrcode
-                    qr_img = qrcode.make(mob_url)
-                    st.image(qr_img, use_container_width=True)
-                    st.markdown(f"[👉 스마트폰 링크 열기]({mob_url})")
-                st.markdown("---")
-        except Exception:
-            pass
-    
-    # 저장된 키 불러오기 (우선순위: 사용자 계정 DB > 관리자 공용 키 > secrets.toml > 환경변수)
+    # 3. AI 엔진 및 API 키 설정
     stored_key = ""
     if uname:
         stored_key = get_user_api_key(uname)
@@ -187,132 +420,126 @@ with st.sidebar:
     if not stored_key:
         stored_key = os.environ.get("GEMINI_API_KEY", "")
 
-    local_secrets = os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml")
-    if not stored_key and os.path.exists(local_secrets):
-        try:
-            with open(local_secrets, "r", encoding="utf-8") as f:
-                for line in f:
-                    if "GEMINI_API_KEY" in line and "=" in line:
-                        stored_key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        break
-        except Exception:
-            pass
-
-    st.subheader("🔑 Gemini API 설정")
+    st.subheader("⚡ AI 엔진 & 인증")
     default_mock = False if stored_key else True
     use_mock = st.checkbox("샘플 모드로 바로 테스트하기 (키 불필요)", value=default_mock, key="chk_use_mock")
-    
+
     api_key_input = stored_key
     if not use_mock:
-        new_key = st.text_input(
-            "Gemini API Key (무료)",
-            value=stored_key,
-            type="password",
-            placeholder="AI Studio에서 발급받은 무료 키 입력",
-            help="Google AI Studio(aistudio.google.com)에서 무료로 즉시 발급 가능합니다.",
-            key="inp_user_gemini_key"
-        )
-        val = new_key.strip() if new_key else ""
-        
-        # 새 키가 입력되었거나 변경된 경우 계정 DB 및 로컬 환경에 즉시 영구 저장
-        if val and val != stored_key:
-            if uname:
-                save_user_api_key(uname, val)
-            os.environ["GEMINI_API_KEY"] = val
-            try:
-                os.makedirs(os.path.dirname(local_secrets), exist_ok=True)
-                with open(local_secrets, "w", encoding="utf-8") as f:
-                    f.write(f'GEMINI_API_KEY = "{val}"\n')
-            except Exception:
-                pass
-            stored_key = val
-        elif not val and stored_key:
-            # 사용자가 키를 비운 경우
-            if uname:
-                save_user_api_key(uname, "")
-            stored_key = ""
-        
-        api_key_input = stored_key
+        with st.expander("🔑 Gemini API 키 관리 (계정 자동 저장)", expanded=(not stored_key)):
+            new_key = st.text_input(
+                "Gemini API Key",
+                value=stored_key,
+                type="password",
+                placeholder="Google AI Studio 발급 무료 키",
+                help="Google AI Studio(aistudio.google.com)에서 무료로 즉시 발급 가능합니다.",
+                key="inp_user_gemini_key"
+            )
+            val = new_key.strip() if new_key else ""
+            if val and val != stored_key:
+                if uname:
+                    save_user_api_key(uname, val)
+                os.environ["GEMINI_API_KEY"] = val
+                stored_key = val
+                st.success("✅ 계정에 안전하게 저장되었습니다!")
+            elif not val and stored_key:
+                if uname:
+                    save_user_api_key(uname, "")
+                stored_key = ""
 
-        if api_key_input:
-            st.success("✅ API 키가 계정에 안전하게 저장되었습니다! (재접속해도 자동 유지)")
-        else:
-            st.warning("⚠️ 사진 속 진짜 문제를 풀려면 API 키를 입력해주세요.")
-        st.caption("👉 [Google AI Studio에서 무료 키 받기](https://aistudio.google.com/apikey)")
-    else:
-        st.info("💡 **샘플 모드 활성화됨**: API 키 없이도 손글씨 렌더링과 합성 기능을 바로 확인하실 수 있습니다.")
+            api_key_input = stored_key
+            if not api_key_input:
+                st.caption("👉 [Google AI Studio에서 무료 키 받기](https://aistudio.google.com/apikey)")
     
     st.markdown("---")
-    st.subheader("✍️ 손글씨 폰트 선택")
+
+    # 4. 필기체 및 펜 스타일 스튜디오
+    st.subheader("✍️ 필기 스타일 스튜디오")
     selected_font = st.selectbox(
-        "폰트 종류",
+        "손글씨 폰트 선택",
         options=list(FONT_MAP.keys()),
         index=0,
-        help="다양한 개성의 한글 손글씨 폰트를 선택할 수 있습니다."
+        help="바른히피, 개구체, 동글체 등 자연스러운 개성의 손글씨 폰트입니다."
     )
     
-    st.subheader("🖊️ 필기구(펜) 스타일")
     selected_pen = st.selectbox(
-        "펜 종류 및 색상",
+        "필기구(펜) 스타일",
         options=list(PEN_STYLES.keys()),
         index=0,
-        help="수험생 볼펜, 흑연 연필, 젤펜, 채점용 빨간펜 등을 선택할 수 있습니다."
+        help="0.5mm 흑색 수험생 볼펜, 0.7mm 블루 젤펜, 샤프/연필, 채점용 레드펜 등을 지원합니다."
     )
     
-    st.subheader("📐 풀이 합성 모드")
     layout_mode = st.radio(
-        "합성 레이아웃",
+        "합성 레이아웃 모드",
         options=[
-            "✍️ 문제집 빈 공간(여백)에 직접 쓰기 (추천)",
-            "📌 포스트잇 메모지 붙이기 (안전 크기)",
+            "✍️ 여백 직접 필기 모드 (추천)",
+            "📌 포스트잇 메모지 부착 모드",
             "📖 우측 모눈노트 확장 모드"
         ],
         index=0,
-        help="문제 본문을 가리지 않고 비어 있는 연습장/여백에 맞춰 작성합니다."
+        help="문제 본문을 가리지 않고 최적의 풀이 노트를 합성합니다."
     )
     
     postit_color = "노란색"
     if "포스트잇" in layout_mode:
         postit_color = st.selectbox("포스트잇 색상", list(POSTIT_COLORS.keys()), index=0)
 
-# ----------------- 메인 영역 -----------------
-st.title("✏️ 문제집 손글씨 풀이 노트 생성기")
-st.markdown(
-    "문제집이나 시험지 사진을 업로드하면, AI가 문제를 풀어 **진짜 손으로 푼 듯한 필기 노트**를 이미지 위에 합성해 드립니다."
-)
+    # 5. 모바일 연동 안내
+    public_url_file = os.path.join(os.path.dirname(__file__), "assets", "public_url.txt")
+    if os.path.exists(public_url_file):
+        try:
+            with open(public_url_file, "r", encoding="utf-8") as f:
+                mob_url = f.read().strip()
+            if mob_url:
+                with st.expander("📱 스마트폰 접속용 QR 코드", expanded=False):
+                    import qrcode
+                    qr_img = qrcode.make(mob_url)
+                    st.image(qr_img, use_container_width=True)
+                    st.markdown(f"[👉 스마트폰 링크 열기]({mob_url})")
+        except Exception:
+            pass
 
-col_upload, col_preview = st.columns([1, 1], gap="medium")
+
+# ----------------- 메인 작업 스튜디오 (2-Column) -----------------
+col_upload, col_preview = st.columns([1, 1], gap="large")
 
 with col_upload:
-    st.subheader("1. 문제집 사진 올리기 / 캡처 붙여넣기")
-    
-    col_p, col_s = st.columns([1.2, 1], gap="small")
+    st.markdown("""
+    <div class="studio-header">
+        <span class="step-badge">STEP 1</span>
+        <span>문제지 이미지 등록</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 빠른 액션 툴바 (캡처 붙여넣기 및 샘플 불러오기)
+    col_p, col_s = st.columns([1.3, 1], gap="small")
     with col_p:
         if paste_image_button is not None:
             paste_result = paste_image_button(
-                label="📋 캡처 붙여넣기 (Ctrl+V)",
-                background_color="#1E88E5",
-                hover_background_color="#1565C0",
+                label="📋 화면 캡처 붙여넣기 (Ctrl+V)",
+                background_color="#4F46E5",
+                hover_background_color="#4338CA",
                 errors="ignore",
                 key="clipboard_paste_btn"
             )
         else:
             paste_result = None
     with col_s:
-        use_sample_btn = st.button("📄 샘플 문제 불러오기", use_container_width=True)
+        use_sample_btn = st.button("📄 샘플 문제 불러오기", use_container_width=True, key="btn_load_sample")
 
     uploaded_file = st.file_uploader(
-        "또는 직접 사진을 업로드하세요 (JPG, PNG)",
-        type=["jpg", "jpeg", "png"]
+        "또는 문제집/시험지 사진을 직접 업로드하세요",
+        type=["jpg", "jpeg", "png"],
+        help="선명한 수학, 과학, 논리학 교재 이미지를 권장합니다."
     )
     
-    # 클립보드 캡처, 업로드, 샘플 순차 처리
+    # 이미지 데이터 로드
     if paste_result and paste_result.image_data is not None:
         buf = io.BytesIO()
         paste_result.image_data.convert("RGB").save(buf, format="PNG")
         st.session_state["active_img_bytes"] = buf.getvalue()
         st.session_state["source_type"] = "clipboard"
-        st.toast("📋 클립보드 캡처 이미지를 성공적으로 가져왔습니다!", icon="✅")
+        st.toast("📋 캡처 이미지를 성공적으로 가져왔습니다!", icon="✅")
     elif uploaded_file is not None:
         st.session_state["active_img_bytes"] = uploaded_file.getvalue()
         st.session_state["source_type"] = "uploaded"
@@ -331,18 +558,36 @@ with col_upload:
             current_image = None
 
     if current_image:
-        st.image(current_image, caption="선택/캡처된 문제집 이미지", use_container_width=True)
-        generate_btn = st.button("🚀 손글씨 풀이 작성 시작!", type="primary", use_container_width=True)
+        st.markdown('<div style="border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); margin: 12px 0;">', unsafe_allow_html=True)
+        st.image(current_image, caption="등록된 문제집 원본 이미지", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        generate_btn = st.button("🚀 AI 손글씨 해설 노트 생성 시작!", type="primary", use_container_width=True, key="btn_run_solve")
     else:
-        st.info("💡 캡처 도구(Win + Shift + S)로 화면을 캡처한 뒤 **[📋 캡처 붙여넣기]** 버튼을 누르시거나, 사진 파일을 업로드해주세요.")
+        st.markdown("""
+        <div class="empty-placeholder" style="margin-top: 14px;">
+            <div style="font-size: 2.2rem; margin-bottom: 12px;">📷</div>
+            <div style="font-weight: 700; color: #f8fafc; font-size: 1rem; margin-bottom: 6px;">등록된 문제가 없습니다</div>
+            <div style="font-size: 0.85rem; color: #94a3b8; line-height: 1.5;">
+                컴퓨터 화면 캡처(Win + Shift + S) 후 <b>[📋 화면 캡처 붙여넣기]</b>를 누르시거나<br>
+                위의 파일 업로더에 문제 사진을 끌어다 놓으세요.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         generate_btn = False
 
+
 with col_preview:
-    st.subheader("2. 손글씨 풀이 결과")
+    st.markdown("""
+    <div class="studio-header">
+        <span class="step-badge">STEP 2</span>
+        <span>완성된 손글씨 해설지</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    composer = get_composer()
     
     if generate_btn and current_image and image_bytes:
-        with st.spinner("AI가 문제를 읽고 손글씨 풀이를 작성 중입니다..."):
-            # 1. 문제 풀이 획득
+        with st.spinner("AI가 문제를 정밀 분석하여 손글씨 필기 노트를 렌더링 중입니다..."):
             active_key = None if use_mock else api_key_input
             solution_data = solve_problem_with_gemini(
                 image_bytes=image_bytes,
@@ -357,7 +602,6 @@ with col_preview:
                 if "result_img" in st.session_state:
                     del st.session_state["result_img"]
             else:
-                # 2. 합성 레이아웃 적용
                 if "여백" in layout_mode:
                     result_img = composer.compose_margin_mode(
                         base_img=current_image,
@@ -373,7 +617,7 @@ with col_preview:
                         pen_style=selected_pen,
                         postit_color_name=postit_color
                     )
-                else: # 노트 확장 모드
+                else: # 모눈노트 확장 모드
                     result_img = composer.compose_notebook_extension_mode(
                         base_img=current_image,
                         solution_data=solution_data,
@@ -387,10 +631,13 @@ with col_preview:
                     increment_solve_count(st.session_state["user"]["username"])
                 except Exception:
                     pass
-                st.success("✨ 손글씨 풀이 완성이 완료되었습니다!")
+                st.toast("✨ 손글씨 해설지 완성이 완료되었습니다!", icon="🎉")
 
     if "result_img" in st.session_state:
-        st.image(st.session_state["result_img"], caption="손글씨 풀이 합성 결과", use_container_width=True)
+        # 완성된 이미지 뷰어
+        st.markdown('<div style="border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 8px 32px rgba(0,0,0,0.3); margin-bottom: 16px;">', unsafe_allow_html=True)
+        st.image(st.session_state["result_img"], caption="손글씨 풀이 합성 결과 (고해상도 렌더링)", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         
         # 이미지 다운로드 버튼
         buf = io.BytesIO()
@@ -398,26 +645,52 @@ with col_preview:
         byte_im = buf.getvalue()
         
         st.download_button(
-            label="💾 완성된 풀이 이미지 다운로드 (PNG)",
+            label="💾 완성본 이미지 고화질 다운로드 (PNG)",
             data=byte_im,
-            file_name="손글씨_문제집_풀이.png",
+            file_name="ScribeNote_손글씨_해설노트.png",
             mime="image/png",
+            type="primary",
             use_container_width=True
         )
         
-        # 상세 풀이 텍스트 아코디언
-        with st.expander("📝 텍스트 풀이 및 사용 모델 상세 보기"):
-            data = st.session_state.get("solution_data", {})
-            used_m = data.get("used_model")
-            if used_m:
-                st.success(f"🤖 **풀이에 사용된 AI 모델**: `{used_m}` (최고 성능 순 적용)")
-            st.markdown(f"**문제:** {data.get('problem_title', '')}")
-            st.markdown(f"**요약:** {data.get('problem_summary', '')}")
-            st.markdown("**풀이 단계:**")
+        # 상세 구조화 풀이 리포트 카드
+        data = st.session_state.get("solution_data", {})
+        used_m = data.get("used_model", "Gemini 3.x Flash")
+        
+        with st.expander("📝 AI 해설 상세 분석 리포트", expanded=True):
+            st.markdown(f"""
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <span style="font-weight: 700; color: #f8fafc; font-size: 1.05rem;">{data.get('problem_title', '문제 해설')}</span>
+                <span class="pro-badge">🤖 {used_m}</span>
+            </div>
+            <div style="font-size: 0.88rem; color: #94a3b8; margin-bottom: 16px;">{data.get('problem_summary', '')}</div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("**단계별 풀이 과정:**")
             for step in data.get("steps", []):
-                st.write(step)
-            st.markdown(f"**정답:** `{data.get('final_answer', '')}`")
+                st.markdown(f'<div class="step-card">{step}</div>', unsafe_allow_html=True)
+            
+            st.markdown(f"""
+            <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 10px; padding: 12px 16px; margin-top: 14px; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 700; color: #34d399;">최종 결론 및 정답</span>
+                <span style="font-weight: 800; font-size: 1.1rem; color: #ffffff;">{data.get('final_answer', '')}</span>
+            </div>
+            """, unsafe_allow_html=True)
+            
             if data.get("tip"):
-                st.info(data.get("tip"))
+                st.markdown(f"""
+                <div class="tip-box">
+                    <b>💡 선생님의 핵심 출제 포인트:</b><br>{data.get('tip')}
+                </div>
+                """, unsafe_allow_html=True)
     else:
-        st.empty()
+        st.markdown("""
+        <div class="empty-placeholder">
+            <div style="font-size: 2.2rem; margin-bottom: 12px;">✨</div>
+            <div style="font-weight: 700; color: #f8fafc; font-size: 1rem; margin-bottom: 6px;">생성 준비 완료</div>
+            <div style="font-size: 0.85rem; color: #94a3b8; line-height: 1.5;">
+                좌측에서 문제를 지정하신 후 <b>[🚀 AI 손글씨 해설 노트 생성 시작]</b>을 누르시면<br>
+                이곳에 자연스러운 필기체 해설지가 실시간 렌더링됩니다.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
