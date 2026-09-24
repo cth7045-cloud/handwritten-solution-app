@@ -67,13 +67,39 @@ with st.sidebar:
         except Exception:
             pass
     
-    # 환경변수 또는 Streamlit secrets에서 API 키 자동 감지
-    stored_key = os.environ.get("GEMINI_API_KEY", "")
-    try:
-        if not stored_key and "GEMINI_API_KEY" in st.secrets:
-            stored_key = st.secrets["GEMINI_API_KEY"]
-    except Exception:
-        pass
+    # 1. 브라우저 localStorage 동기화 컴포넌트 선언
+    key_store_path = os.path.join(os.path.dirname(__file__), "components", "key_store")
+    saved_browser_key = ""
+    if os.path.exists(key_store_path):
+        try:
+            _key_store_comp = st.components.v1.declare_component("key_store", path=key_store_path)
+            saved_browser_key = _key_store_comp(save_key=st.session_state.get("pending_save_key", ""), default="")
+        except Exception:
+            pass
+
+    # 2. 저장된 키 불러오기 (우선순위: session_state > localStorage > secrets > env > local file)
+    stored_key = st.session_state.get("gemini_api_key", "")
+    if not stored_key and saved_browser_key:
+        stored_key = saved_browser_key
+    if not stored_key:
+        try:
+            if "GEMINI_API_KEY" in st.secrets:
+                stored_key = st.secrets["GEMINI_API_KEY"]
+        except Exception:
+            pass
+    if not stored_key:
+        stored_key = os.environ.get("GEMINI_API_KEY", "")
+
+    local_secrets = os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml")
+    if not stored_key and os.path.exists(local_secrets):
+        try:
+            with open(local_secrets, "r", encoding="utf-8") as f:
+                for line in f:
+                    if "GEMINI_API_KEY" in line and "=" in line:
+                        stored_key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+        except Exception:
+            pass
 
     st.subheader("🔑 Gemini API 설정")
     default_mock = False if stored_key else True
@@ -81,15 +107,30 @@ with st.sidebar:
     
     api_key_input = stored_key
     if not use_mock:
-        api_key_input = st.text_input(
+        new_key = st.text_input(
             "Gemini API Key (무료)",
             value=stored_key,
             type="password",
             placeholder="AI Studio에서 발급받은 무료 키 입력",
             help="Google AI Studio(aistudio.google.com)에서 무료로 즉시 발급 가능합니다."
         )
+        api_key_input = new_key.strip() if new_key else ""
+        
+        # 새 키가 입력되었거나 변경된 경우 즉시 영구 저장
+        if api_key_input and api_key_input != stored_key:
+            st.session_state["gemini_api_key"] = api_key_input
+            st.session_state["pending_save_key"] = api_key_input
+            os.environ["GEMINI_API_KEY"] = api_key_input
+            try:
+                os.makedirs(os.path.dirname(local_secrets), exist_ok=True)
+                with open(local_secrets, "w", encoding="utf-8") as f:
+                    f.write(f'GEMINI_API_KEY = "{api_key_input}"\n')
+            except Exception:
+                pass
+            st.rerun()
+
         if api_key_input:
-            st.success("✅ Gemini API 키가 활성화되었습니다! 진짜 AI가 문제를 풉니다.")
+            st.success("✅ API 키가 저장되었습니다! (다음 접속 시에도 자동 유지)")
         else:
             st.warning("⚠️ 사진 속 진짜 문제를 풀려면 API 키를 입력해주세요.")
         st.caption("👉 [Google AI Studio에서 무료 키 받기](https://aistudio.google.com/apikey)")
@@ -203,35 +244,41 @@ with col_preview:
                 mime_type="image/png",
                 api_key=active_key
             )
-            time.sleep(0.5)
+            time.sleep(0.3)
             
-            # 2. 합성 레이아웃 적용
-            if "여백" in layout_mode:
-                result_img = composer.compose_margin_mode(
-                    base_img=current_image,
-                    solution_data=solution_data,
-                    font_name=selected_font,
-                    pen_style=selected_pen
-                )
-            elif "포스트잇" in layout_mode:
-                result_img = composer.compose_postit_mode(
-                    base_img=current_image,
-                    solution_data=solution_data,
-                    font_name=selected_font,
-                    pen_style=selected_pen,
-                    postit_color_name=postit_color
-                )
-            else: # 노트 확장 모드
-                result_img = composer.compose_notebook_extension_mode(
-                    base_img=current_image,
-                    solution_data=solution_data,
-                    font_name=selected_font,
-                    pen_style=selected_pen
-                )
-            
-            st.session_state["result_img"] = result_img
-            st.session_state["solution_data"] = solution_data
-            st.success("✨ 손글씨 풀이 완성이 완료되었습니다!")
+            if solution_data.get("error"):
+                st.error(f"❌ AI 문제 풀이 오류: {solution_data.get('error_message')}")
+                st.warning("⚠️ 입력하신 Gemini API 키가 활성 상태인지 확인해주세요. (Google AI Studio에서 무료 발급)")
+                if "result_img" in st.session_state:
+                    del st.session_state["result_img"]
+            else:
+                # 2. 합성 레이아웃 적용
+                if "여백" in layout_mode:
+                    result_img = composer.compose_margin_mode(
+                        base_img=current_image,
+                        solution_data=solution_data,
+                        font_name=selected_font,
+                        pen_style=selected_pen
+                    )
+                elif "포스트잇" in layout_mode:
+                    result_img = composer.compose_postit_mode(
+                        base_img=current_image,
+                        solution_data=solution_data,
+                        font_name=selected_font,
+                        pen_style=selected_pen,
+                        postit_color_name=postit_color
+                    )
+                else: # 노트 확장 모드
+                    result_img = composer.compose_notebook_extension_mode(
+                        base_img=current_image,
+                        solution_data=solution_data,
+                        font_name=selected_font,
+                        pen_style=selected_pen
+                    )
+                
+                st.session_state["result_img"] = result_img
+                st.session_state["solution_data"] = solution_data
+                st.success("✨ 손글씨 풀이 완성이 완료되었습니다!")
 
     if "result_img" in st.session_state:
         st.image(st.session_state["result_img"], caption="손글씨 풀이 합성 결과", use_container_width=True)

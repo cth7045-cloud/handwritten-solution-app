@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script>
+function sendToStreamlit(value) {
+    window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: "streamlit:setComponentValue",
+        value: value
+    }, "*");
+}
+
+window.addEventListener("message", function(event) {
+    if (event.data.type === "streamlit:render") {
+        const saveKey = event.data.args.save_key;
+        if (saveKey && saveKey.trim().length > 0) {
+            try {
+                localStorage.setItem("user_gemini_api_key", saveKey.trim());
+            } catch(e) {}
+        }
+        const clearKey = event.data.args.clear_key;
+        if (clearKey) {
+            try {
+                localStorage.removeItem("user_gemini_api_key");
+            } catch(e) {}
+        }
+        let saved = "";
+        try {
+            saved = localStorage.getItem("user_gemini_api_key") || "";
+        } catch(e) {}
+        sendToStreamlit(saved);
+    }
+});
+
+// Initialize component
+window.parent.postMessage({
+    isStreamlitMessage: true,
+    type: "streamlit:componentReady",
+    apiVersion: 1
+}, "*");
+</script>
+</head>
+<body style="margin: 0; padding: 0; overflow: hidden; height: 0;"></body>
+</html>
