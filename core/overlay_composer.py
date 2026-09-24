@@ -78,67 +78,86 @@ class OverlayComposer:
     ) -> Image.Image:
         """
         일반 시험지/문제집의 자연스러운 빈 공간에 직접 손글씨를 적은 것처럼 합성합니다.
-        문제가 꽉 차있거나 좁게 크롭된 경우 캔버스를 아래로 스마트하게 확장하여
-        글씨가 잘리거나 겹치지 않고 100% 완벽하게 표시되도록 보장합니다.
+        문제가 꽉 차있거나 좁게 크롭된 경우(스크린샷 등) 캔버스를 여유롭게 확장하여
+        글씨가 삐져나오거나 잘리지 않고 고품질 학습 노트 형태로 완성되도록 보장합니다.
         """
         orig_w, orig_h = base_img.size
         min_x, min_y, max_x, max_y = detect_content_bounds(base_img)
 
-        # 이미지 너비에 비례한 가독성 높은 폰트 크기 산출
-        font_size = max(20, min(28, int(orig_w * 0.026)))
-        line_spacing = int(font_size * 0.45)
-        max_wrap_w = int(orig_w * 0.86)
+        # 1. 캔버스 너비 표준화: 최소 860px을 보장하여 좁은 크롭 스크린샷에서도 수식/풀이가 여유 있게 들어감
+        min_comfortable_w = 860
+        target_w = max(orig_w, min_comfortable_w)
 
-        # 풀이 텍스트 라인 구성
+        # 폰트 크기 및 행간
+        font_size = max(21, min(26, int(target_w * 0.026)))
+        line_spacing = int(font_size * 0.45)
+        
+        # 가로 래핑 최대 너비 (좌우 여백 확보)
+        max_wrap_w = target_w - 120
+
+        # 풀이 텍스트 라인 구성 - 모든 제목, 정답, 팁을 예외 없이 철저하게 wrap_text 처리!
         lines_to_draw: List[str] = []
         title = solution_data.get("problem_title", "")
         if title:
-            lines_to_draw.append(f"<{title}>")
+            lines_to_draw.extend(self.engine.wrap_text(f"<{title}>", font_name, font_size, max_wrap_w))
             lines_to_draw.append("")
         
         for step in solution_data.get("steps", []):
-            wrapped = self.engine.wrap_text(step, font_name, font_size, max_wrap_w)
-            lines_to_draw.extend(wrapped)
+            lines_to_draw.extend(self.engine.wrap_text(step, font_name, font_size, max_wrap_w))
 
         ans = solution_data.get("final_answer", "")
         if ans:
             lines_to_draw.append("")
-            lines_to_draw.append(f"∴ 정답: {ans}")
+            lines_to_draw.extend(self.engine.wrap_text(f"∴ 정답: {ans}", font_name, font_size, max_wrap_w))
 
         tip = solution_data.get("tip", "")
         if tip:
             lines_to_draw.append("")
-            wrapped_tip = self.engine.wrap_text(f"★ 핵심 Tip: {tip}", font_name, font_size, max_wrap_w)
-            lines_to_draw.extend(wrapped_tip)
+            lines_to_draw.extend(self.engine.wrap_text(f"★ 핵심 Tip: {tip}", font_name, font_size, max_wrap_w))
 
-        # 전체 텍스트가 차지할 총 높이 계산
+        # 전체 텍스트가 차지할 총 높이 (넉넉한 여백 80px)
         total_text_h = len(lines_to_draw) * (font_size + line_spacing) + 80
 
-        # 기존 이미지 하단의 잔여 공간 확인
-        bottom_space = max(0, orig_h - max_y - 20)
+        # 배경색 추출
+        bg_rgb = sample_background_color(base_img)
 
-        # 하단 공간이 전체 풀이 텍스트를 담기에 충분한지 확인
-        if bottom_space >= total_text_h + 40:
-            # 원본 이미지 내에 이미 충분한 여백이 있는 경우 (전체 시험지 등)
+        # 2. 원본 이미지가 이미 넓고(>=860px) 하단 여백이 텍스트를 담기에 충분한지 검사
+        bottom_space = max(0, orig_h - max_y - 20)
+        if orig_w >= min_comfortable_w and bottom_space >= total_text_h + 40:
+            # 원본 시험지 내부 여백에 직접 기입
             working_img = base_img.convert("RGBA")
             start_x = max(int(orig_w * 0.07), min_x)
             start_y = max_y + 28
         else:
-            # 문제 사진이 잘려 있거나 여백이 부족한 경우 (크롭 캡처 등)
-            # 캔버스를 원본 아래로 확장하여 문제 본문을 100% 보존하고 아래에 완벽한 풀이 노트를 생성
-            new_h = orig_h + total_text_h + 70
-            bg_rgb = sample_background_color(base_img)
-            
-            working_img = Image.new("RGBA", (orig_w, new_h), bg_rgb + (255,))
-            working_img.paste(base_img.convert("RGBA"), (0, 0))
+            # 좁게 크롭된 캡처이거나 하단 여백이 부족한 경우 -> 깔끔한 학습 노트 캔버스 생성
+            if orig_w < min_comfortable_w:
+                # 좁은 이미지: 상단에 문제 카드 형태로 깔끔하게 배치 (필기와 좌측 정렬 통일)
+                img_x = 55
+                img_y = 25
+                div_y = img_y + orig_h + 20
+                start_x = 55
+                start_y = div_y + 35
+                total_h = start_y + total_text_h + 60
 
-            # 문제 본문과 손글씨 풀이 사이 깔끔하고 은은한 구분선 추가
-            draw = ImageDraw.Draw(working_img)
-            div_y = orig_h + 16
-            draw.line([(int(orig_w * 0.05), div_y), (int(orig_w * 0.95), div_y)], fill=(210, 218, 228, 200), width=1)
-            
-            start_x = int(orig_w * 0.07)
-            start_y = div_y + 36
+                working_img = Image.new("RGBA", (target_w, total_h), bg_rgb + (255,))
+                working_img.paste(base_img.convert("RGBA"), (img_x, img_y))
+
+                # 문제 카드 테두리 및 구분선
+                draw = ImageDraw.Draw(working_img)
+                draw.rectangle([img_x - 1, img_y - 1, img_x + orig_w, img_y + orig_h], outline=(225, 230, 238, 220), width=1)
+                draw.line([(45, div_y), (target_w - 45, div_y)], fill=(215, 222, 232, 220), width=1)
+            else:
+                # 원본 너비는 충분하지만 세로 길이가 부족한 경우: 아래로 확장
+                new_h = orig_h + total_text_h + 80
+                working_img = Image.new("RGBA", (orig_w, new_h), bg_rgb + (255,))
+                working_img.paste(base_img.convert("RGBA"), (0, 0))
+
+                draw = ImageDraw.Draw(working_img)
+                div_y = orig_h + 16
+                draw.line([(int(orig_w * 0.05), div_y), (int(orig_w * 0.95), div_y)], fill=(210, 218, 228, 200), width=1)
+
+                start_x = int(orig_w * 0.07)
+                start_y = div_y + 36
 
         # 손글씨 렌더링
         result, end_pos = self.engine.draw_handwritten_text(
@@ -164,39 +183,38 @@ class OverlayComposer:
     ) -> Image.Image:
         """
         문제 지문을 가리지 않도록 포스트잇 메모지를 합성합니다.
-        문제가 꽉 차 있는 경우 캔버스를 확장하여 깔끔하게 부착합니다.
+        문제가 작거나 좁은 경우 캔버스를 여유롭게 확장하여 포스트잇이 잘리는 현상을 100% 방지합니다.
         """
         orig_w, orig_h = base_img.size
         min_x, min_y, max_x, max_y = detect_content_bounds(base_img)
 
-        font_size = max(18, min(24, int(orig_w * 0.024)))
+        # 포스트잇 가로 크기: 기본 520px 이상 확보
+        postit_w = max(520, min(720, int(orig_w * 0.88)))
+        wrap_w = postit_w - 60
+        font_size = max(19, min(23, int(postit_w * 0.035)))
         line_spacing = int(font_size * 0.45)
-        
-        postit_w = max(380, min(650, int(orig_w * 0.85)))
-        wrap_w = postit_w - 55
 
         lines_to_draw: List[str] = []
         title = solution_data.get("problem_title", "풀이 과정")
-        lines_to_draw.append(f"[풀이] {title}")
-        lines_to_draw.append("")
+        if title:
+            lines_to_draw.extend(self.engine.wrap_text(f"[풀이] {title}", font_name, font_size, wrap_w))
+            lines_to_draw.append("")
 
         for step in solution_data.get("steps", []):
-            wrapped = self.engine.wrap_text(step, font_name, font_size, wrap_w)
-            lines_to_draw.extend(wrapped)
+            lines_to_draw.extend(self.engine.wrap_text(step, font_name, font_size, wrap_w))
 
         ans = solution_data.get("final_answer", "")
         if ans:
             lines_to_draw.append("")
-            lines_to_draw.append(f"정답: {ans}")
+            lines_to_draw.extend(self.engine.wrap_text(f"정답: {ans}", font_name, font_size, wrap_w))
 
         tip = solution_data.get("tip", "")
         if tip:
             lines_to_draw.append("")
-            wrapped_tip = self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, wrap_w)
-            lines_to_draw.extend(wrapped_tip)
+            lines_to_draw.extend(self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, wrap_w))
 
-        tape_h = 30
-        postit_h = max(320, len(lines_to_draw) * (font_size + line_spacing) + tape_h + 60)
+        tape_h = 32
+        postit_h = max(340, len(lines_to_draw) * (font_size + line_spacing) + tape_h + 70)
 
         bg_rgb = POSTIT_COLORS.get(postit_color_name, (255, 250, 195))
 
@@ -204,14 +222,14 @@ class OverlayComposer:
         postit = Image.new("RGBA", (postit_w, postit_h), bg_rgb + (255,))
         draw = ImageDraw.Draw(postit)
 
-        # 상단 테이프
-        darker_color = (max(0, bg_rgb[0] - 15), max(0, bg_rgb[1] - 15), max(0, bg_rgb[2] - 15), 180)
+        # 상단 마스킹 테이프 효과
+        darker_color = (max(0, bg_rgb[0] - 20), max(0, bg_rgb[1] - 20), max(0, bg_rgb[2] - 20), 180)
         draw.rectangle([0, 0, postit_w, tape_h], fill=darker_color)
 
         postit_with_text, end_pos = self.engine.draw_handwritten_text(
             base_img=postit,
             text_lines=lines_to_draw,
-            start_pos=(25, tape_h + 15),
+            start_pos=(30, tape_h + 20),
             font_name=font_name,
             font_size=font_size,
             pen_style_name=pen_style,
@@ -219,31 +237,43 @@ class OverlayComposer:
             apply_jitter=True
         )
 
-        # 그림자 및 약간의 기울기
-        angle = random.uniform(-1.2, 1.2)
-        pad = 25
+        # 그림자 및 자연스러운 미세 회전
+        angle = random.uniform(-1.0, 1.0)
+        pad = 30
         shadow_box = Image.new("RGBA", (postit_w + pad * 2, postit_h + pad * 2), (0, 0, 0, 0))
         sdraw = ImageDraw.Draw(shadow_box)
-        sdraw.rectangle([pad + 4, pad + 8, pad + postit_w + 4, pad + postit_h + 8], fill=(0, 0, 0, 60))
-        shadow_box = shadow_box.filter(ImageFilter.GaussianBlur(8))
+        sdraw.rectangle([pad + 4, pad + 8, pad + postit_w + 4, pad + postit_h + 8], fill=(0, 0, 0, 55))
+        shadow_box = shadow_box.filter(ImageFilter.GaussianBlur(10))
 
         shadow_box.alpha_composite(postit_with_text, (pad, pad))
         rotated_postit = shadow_box.rotate(angle, resample=Image.BICUBIC, expand=True)
 
-        # 배치 영역 및 캔버스 확장 판별
+        # 캔버스 크기 결정: 캔버스 너비는 최소 (rotated_postit.width + 80) 이상이어야 잘리지 않음!
+        target_canvas_w = max(orig_w, rotated_postit.width + 80)
+        bg_rgb_base = sample_background_color(base_img)
+
+        # 하단 공간 판별
         bottom_space = max(0, orig_h - max_y - 20)
-
-        if bottom_space < rotated_postit.height + 40:
-            new_h = orig_h + rotated_postit.height + 60
-            bg_rgb_base = sample_background_color(base_img)
-            result = Image.new("RGBA", (orig_w, new_h), bg_rgb_base + (255,))
-            result.paste(base_img.convert("RGBA"), (0, 0))
-            target_y = orig_h + 20
-        else:
+        if orig_w >= target_canvas_w and bottom_space >= rotated_postit.height + 40:
             result = base_img.convert("RGBA")
+            target_x = max(15, (orig_w - rotated_postit.width) // 2)
             target_y = max_y + 20
+        else:
+            # 캔버스 확장
+            if orig_w < target_canvas_w:
+                target_canvas_h = orig_h + rotated_postit.height + 70
+                result = Image.new("RGBA", (target_canvas_w, target_canvas_h), bg_rgb_base + (255,))
+                img_x = (target_canvas_w - orig_w) // 2
+                result.paste(base_img.convert("RGBA"), (img_x, 20))
+                target_x = (target_canvas_w - rotated_postit.width) // 2
+                target_y = orig_h + 40
+            else:
+                target_canvas_h = orig_h + rotated_postit.height + 60
+                result = Image.new("RGBA", (orig_w, target_canvas_h), bg_rgb_base + (255,))
+                result.paste(base_img.convert("RGBA"), (0, 0))
+                target_x = max(15, (orig_w - rotated_postit.width) // 2)
+                target_y = orig_h + 20
 
-        target_x = max(15, int((orig_w - rotated_postit.width) / 2))
         result.alpha_composite(rotated_postit, (int(target_x), int(target_y)))
         return result.convert("RGB")
 
@@ -259,30 +289,33 @@ class OverlayComposer:
         풀이 길이에 맞춰 세로 높이도 지능적으로 조절합니다.
         """
         orig_w, orig_h = base_img.size
-        ext_w = max(450, int(orig_w * 0.8))
-        font_size = max(20, min(28, int(ext_w * 0.038)))
+        # 모눈노트 확장 너비: 최소 650px을 주어 수식과 풀이가 시원하게 들어가도록 보장
+        ext_w = max(650, int(orig_w * 0.9))
+        font_size = max(20, min(25, int(ext_w * 0.034)))
         line_spacing = int(font_size * 0.45)
+        wrap_w = ext_w - 75
 
-        lines_to_draw = [
+        lines_to_draw: List[str] = [
             "📝 [선생님 손글씨 풀이 노트]",
             "────────────────────────",
-            f"문제: {solution_data.get('problem_title', '풀이')}",
-            ""
         ]
+        title = solution_data.get("problem_title", "")
+        if title:
+            lines_to_draw.extend(self.engine.wrap_text(f"문제: {title}", font_name, font_size, wrap_w))
+            lines_to_draw.append("")
+
         for step in solution_data.get("steps", []):
-            wrapped = self.engine.wrap_text(step, font_name, font_size, ext_w - 65)
-            lines_to_draw.extend(wrapped)
+            lines_to_draw.extend(self.engine.wrap_text(step, font_name, font_size, wrap_w))
 
         ans = solution_data.get("final_answer", "")
         if ans:
             lines_to_draw.append("")
-            lines_to_draw.append(f"★ 정답: {ans}")
+            lines_to_draw.extend(self.engine.wrap_text(f"★ 정답: {ans}", font_name, font_size, wrap_w))
 
         tip = solution_data.get("tip", "")
         if tip:
             lines_to_draw.append("")
-            wrapped_tip = self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, ext_w - 65)
-            lines_to_draw.extend(wrapped_tip)
+            lines_to_draw.extend(self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, wrap_w))
 
         total_text_h = len(lines_to_draw) * (font_size + line_spacing) + 120
         new_h = max(orig_h, total_text_h)
@@ -293,7 +326,7 @@ class OverlayComposer:
         result.paste(base_img.convert("RGBA"), (0, 0))
 
         # 우측 그리드(모눈) 배경 생성
-        grid_overlay = Image.new("RGBA", (ext_w, new_h), (252, 252, 252, 255))
+        grid_overlay = Image.new("RGBA", (ext_w, new_h), (253, 253, 253, 255))
         draw = ImageDraw.Draw(grid_overlay)
         grid_size = 24
         grid_color = (226, 232, 240, 255)
@@ -302,9 +335,9 @@ class OverlayComposer:
         for y in range(0, new_h, grid_size):
             draw.line([(0, y), (ext_w, y)], fill=grid_color, width=1)
 
-        # 그림자 효과 (왼쪽 경계선)
-        for i in range(12):
-            alpha = int(45 * (1 - i / 12))
+        # 왼쪽 경계선 그림자 효과
+        for i in range(14):
+            alpha = int(45 * (1 - i / 14))
             draw.line([(i, 0), (i, new_h)], fill=(0, 0, 0, alpha), width=1)
 
         result.alpha_composite(grid_overlay, (orig_w, 0))
@@ -321,3 +354,4 @@ class OverlayComposer:
         )
 
         return result_with_text.convert("RGB")
+

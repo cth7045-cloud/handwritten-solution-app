@@ -69,7 +69,40 @@ MATH_FALLBACK_MAP = {
     "√": "루트",
     "·": "*",
     "→": "->",
+    "←": "<-",
+    "↔": "<->",
+    "⇒": "=>",
+    "⇐": "<=",
+    "⇔": "<=>",
+    "∧": "^",
+    "∨": "v",
+    "¬": "~",
+    "∼": "~",
+    "★": "*",
+    "☆": "*",
+    "📝": "[노트]",
+    "📌": "[참고]",
+    "▶": ">",
+    "▷": ">",
+    "■": "*",
+    "□": "*",
+    "●": "*",
+    "○": "*",
+    "✔": "V",
+    "⭕": "O",
+    "❌": "X",
+    "∀": "모든",
+    "∃": "존재",
+    "∈": "in",
+    "∉": "not in",
+    "⊂": "subset",
+    "⊆": "subseteq",
+    "∪": "U",
+    "∩": "n",
+    "∅": "공집합",
+    "∞": "inf",
 }
+
 
 class HandwritingEngine:
     def __init__(self, fonts_dir: str = "fonts"):
@@ -156,7 +189,7 @@ class HandwritingEngine:
         return "".join(cleaned)
 
     def wrap_text(self, text: str, font_name: str, font_size: int, max_width: int) -> List[str]:
-        """지정된 최대 너비에 맞게 텍스트를 줄바꿈합니다."""
+        """지정된 최대 너비에 맞게 텍스트를 줄바꿈합니다 (단어가 길거나 수식인 경우 글자 단위 분할로 절대 잘리지 않음)."""
         font = self.load_font(font_name, font_size)
         sanitized = self.sanitize_math_text(text, font_name)
         lines = []
@@ -176,10 +209,28 @@ class HandwritingEngine:
                 else:
                     if curr_line:
                         lines.append(curr_line)
-                    curr_line = word
+                        curr_line = ""
+                    
+                    bbox_word = font.getbbox(word)
+                    if (bbox_word[2] - bbox_word[0]) <= max_width:
+                        curr_line = word
+                    else:
+                        # 단어/수식 자체가 max_width보다 긴 경우 글자 단위로 안전하게 분할
+                        sub_line = ""
+                        for ch in word:
+                            test_sub = sub_line + ch
+                            bbox_sub = font.getbbox(test_sub)
+                            if (bbox_sub[2] - bbox_sub[0]) <= max_width:
+                                sub_line = test_sub
+                            else:
+                                if sub_line:
+                                    lines.append(sub_line)
+                                sub_line = ch
+                        curr_line = sub_line
             if curr_line:
                 lines.append(curr_line)
         return lines
+
 
     def draw_handwritten_text(
         self,
