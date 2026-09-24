@@ -13,41 +13,6 @@ try:
 except ImportError:
     genai = None
 
-MOCK_SOLUTIONS = [
-    {
-        "problem_title": "이차방정식의 근과 계수의 관계",
-        "problem_summary": "이차방정식 x² - 4x + 3 = 0의 두 근을 α, β라 할 때, α² + β²의 값을 구하시오.",
-        "steps": [
-            "1. 근과 계수의 관계 적용:",
-            "   두 근의 합 α + β = 4",
-            "   두 근의 곱 αβ = 3",
-            "2. 곱셈공식 변형 공식 이용:",
-            "   α² + β² = (α + β)² - 2αβ",
-            "3. 값 대입 및 계산:",
-            "   = (4)² - 2 × 3",
-            "   = 16 - 6 = 10"
-        ],
-        "final_answer": "10",
-        "tip": "★ Point: (α + β)²을 직접 전개하지 말고 변형 공식 바로 쓰기!"
-    },
-    {
-        "problem_title": "삼각함수의 덧셈정리",
-        "problem_summary": "sin(75°)의 정확한 값을 구하시오.",
-        "steps": [
-            "1. 특수각의 합으로 분해:",
-            "   75° = 45° + 30°",
-            "2. 덧셈정리 공식 적용:",
-            "   sin(45° + 30°) = sin45°cos30° + cos45°sin30°",
-            "3. 특수각 삼각비 값 대입:",
-            "   = (√2/2) × (√3/2) + (√2/2) × (1/2)",
-            "4. 분모 통분 후 정리:",
-            "   = (√6 + √2) / 4"
-        ],
-        "final_answer": "(√6 + √2) / 4",
-        "tip": "★ Point: 75° = 45° + 30°, 15° = 45° - 30° 자주 나오는 단골 변형!"
-    }
-]
-
 def solve_problem_with_gemini(
     image_bytes: bytes,
     mime_type: str = "image/png",
@@ -55,13 +20,35 @@ def solve_problem_with_gemini(
 ) -> Dict[str, Any]:
     """
     Gemini API를 호출하여 이미지 속 문제를 풀이합니다.
-    API 키가 없거나 실패 시 유용한 안내와 함께 기본 Mock 풀이를 반환할 수 있습니다.
+    API 키가 없거나 미등록 시 명확한 에러 안내를 반환합니다.
     """
     key = (api_key or os.environ.get("GEMINI_API_KEY", "")).strip()
     
-    if not key or not genai:
-        print("[!] GEMINI_API_KEY가 설정되지 않아 샘플 풀이(Mock) 모드로 동작합니다.")
-        return MOCK_SOLUTIONS[0]
+    if not key:
+        return {
+            "error": True,
+            "error_message": "Gemini API 키가 설정되지 않았습니다.",
+            "problem_title": "Gemini API 키 등록 필요",
+            "problem_summary": "문제를 풀이하려면 사이드바에 유효한 Gemini API 키를 등록해야 합니다.",
+            "steps": [
+                "1. Google AI Studio (https://aistudio.google.com/apikey) 에서 무료 키를 발급받으세요.",
+                "2. 좌측 사이드바 [🔑 Gemini AI 엔진 설정]에 API 키를 입력하세요.",
+                "3. 키 등록 후 [🚀 AI 손글씨 해설 노트 생성 시작!]을 다시 눌러주세요."
+            ],
+            "final_answer": "API 키 필요",
+            "tip": "발급받으신 API 키는 회원님의 브라우저/계정에 자동 저장됩니다."
+        }
+
+    if not genai:
+        return {
+            "error": True,
+            "error_message": "google-genai SDK가 환경에 설치되지 않았습니다.",
+            "problem_title": "SDK 미설치",
+            "problem_summary": "google-genai 패키지가 필요합니다.",
+            "steps": ["pip install google-genai 를 실행하세요."],
+            "final_answer": "설치 필요",
+            "tip": "서버 환경을 확인해주세요."
+        }
 
     try:
         client = genai.Client(api_key=key)

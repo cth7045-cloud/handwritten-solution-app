@@ -5,14 +5,13 @@ Streamlit 기반 정식 상용 SaaS 스타일 리모델링 UI
 import os
 import io
 import time
-from PIL import Image
+from PIL import Image, ImageDraw
 import streamlit as st
 
 from core.handwriting_engine import HandwritingEngine, FONT_MAP, PEN_STYLES
 from core.overlay_composer import OverlayComposer, POSTIT_COLORS
-from core.gemini_solver import solve_problem_with_gemini, MOCK_SOLUTIONS
+from core.gemini_solver import solve_problem_with_gemini
 import download_fonts
-import create_sample_image
 
 try:
     from streamlit_paste_button import paste_image_button
@@ -31,17 +30,39 @@ st.set_page_config(
 # 폰트 다운로드 확인 및 자동 준비
 download_fonts.download_fonts()
 
-# 샘플 이미지 확인 및 자동 준비
-sample_img_path = os.path.join(os.path.dirname(__file__), "assets", "sample_math_problem.png")
-if not os.path.exists(sample_img_path):
-    create_sample_image.generate_sample_problem()
-
 # 엔진 초기화
 @st.cache_resource
 def get_composer():
     engine = HandwritingEngine(fonts_dir="fonts")
     composer = OverlayComposer(engine)
     return composer
+
+# 폰트 미리보기 카드 생성 (캐싱)
+@st.cache_data
+def get_font_preview_image(font_name: str, pen_style: str) -> Image.Image:
+    """선택한 손글씨 폰트와 필기구의 실제 필기 예시 카드를 초고속 생성합니다."""
+    engine = HandwritingEngine(fonts_dir="fonts")
+    w, h = 420, 85
+    card = Image.new("RGBA", (w, h), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(card)
+    draw.rectangle([0, 0, w - 1, h - 1], outline=(220, 226, 235), width=1)
+    
+    sample_lines = [
+        "f(x) = x² + 2x + 1,  A => B",
+        "∴ 정답: x = -1 (풀이 완료!)"
+    ]
+    res, _ = engine.draw_handwritten_text(
+        base_img=card,
+        text_lines=sample_lines,
+        start_pos=(16, 12),
+        font_name=font_name,
+        font_size=19,
+        pen_style_name=pen_style,
+        line_spacing=8,
+        apply_jitter=True
+    )
+    return res.convert("RGB")
+
 
 from core.auth_manager import (
     register_user, authenticate_user, get_all_users,
@@ -501,53 +522,66 @@ with st.sidebar:
         stored_key = os.environ.get("GEMINI_API_KEY", "")
 
     st.subheader("⚡ AI 엔진 & 인증")
-    default_mock = False if stored_key else True
-    use_mock = st.checkbox("샘플 모드로 바로 테스트하기 (키 불필요)", value=default_mock, key="chk_use_mock")
+    with st.expander("🔑 Gemini API 키 관리 (계정 자동 저장)", expanded=(not stored_key)):
+        new_key = st.text_input(
+            "Gemini API Key",
+            value=stored_key,
+            type="password",
+            placeholder="Google AI Studio 발급 무료 키",
+            help="Google AI Studio(aistudio.google.com)에서 무료로 즉시 발급 가능합니다.",
+            key="inp_user_gemini_key"
+        )
+        val = new_key.strip() if new_key else ""
+        if val and val != stored_key:
+            if uname:
+                save_user_api_key(uname, val)
+            os.environ["GEMINI_API_KEY"] = val
+            stored_key = val
+            st.success("✅ 계정에 안전하게 저장되었습니다!")
+        elif not val and stored_key:
+            if uname:
+                save_user_api_key(uname, "")
+            stored_key = ""
 
-    api_key_input = stored_key
-    if not use_mock:
-        with st.expander("🔑 Gemini API 키 관리 (계정 자동 저장)", expanded=(not stored_key)):
-            new_key = st.text_input(
-                "Gemini API Key",
-                value=stored_key,
-                type="password",
-                placeholder="Google AI Studio 발급 무료 키",
-                help="Google AI Studio(aistudio.google.com)에서 무료로 즉시 발급 가능합니다.",
-                key="inp_user_gemini_key"
-            )
-            val = new_key.strip() if new_key else ""
-            if val and val != stored_key:
-                if uname:
-                    save_user_api_key(uname, val)
-                os.environ["GEMINI_API_KEY"] = val
-                stored_key = val
-                st.success("✅ 계정에 안전하게 저장되었습니다!")
-            elif not val and stored_key:
-                if uname:
-                    save_user_api_key(uname, "")
-                stored_key = ""
-
-            api_key_input = stored_key
-            if not api_key_input:
-                st.caption("👉 [Google AI Studio에서 무료 키 받기](https://aistudio.google.com/apikey)")
+        api_key_input = stored_key
+        if not api_key_input:
+            st.warning("⚠️ 문제를 풀이하려면 Gemini API 키가 필요합니다.")
+            st.caption("👉 [Google AI Studio에서 무료 키 받기](https://aistudio.google.com/apikey)")
+        else:
+            st.caption("● Gemini API 키가 정상 등록되어 있습니다.")
     
     st.markdown("---")
 
     # 4. 필기체 및 펜 스타일 스튜디오
     st.subheader("✍️ 필기 스타일 스튜디오")
-    selected_font = st.selectbox(
-        "손글씨 폰트 선택",
-        options=list(FONT_MAP.keys()),
-        index=0,
-        help="바른히피, 개구체, 동글체 등 자연스러운 개성의 손글씨 폰트입니다."
-    )
-    
     selected_pen = st.selectbox(
         "필기구(펜) 스타일",
         options=list(PEN_STYLES.keys()),
         index=0,
-        help="0.5mm 흑색 수험생 볼펜, 0.7mm 블루 젤펜, 샤프/연필, 채점용 레드펜 등을 지원합니다."
+        help="0.5mm 흑색 볼펜, 블루 볼펜, 샤프/연필, 채점용 레드펜 등을 지원합니다."
     )
+
+    selected_font = st.selectbox(
+        "손글씨 폰트 선택",
+        options=list(FONT_MAP.keys()),
+        index=0,
+        help="원하시는 필기체 스타일을 선택하세요. 아래에 실시간 예시가 표시됩니다."
+    )
+    
+    # 선택된 폰트 실시간 필기체 미리보기 카드
+    st.image(
+        get_font_preview_image(selected_font, selected_pen),
+        caption=f"✍️ [{selected_font.split()[0]}] 실제 필기 예시",
+        use_container_width=True
+    )
+
+    # 6종 전체 폰트 한눈에 비교하기
+    with st.expander("👀 6종 전체 필체 한눈에 비교하기", expanded=False):
+        st.caption("현재 선택된 펜 스타일로 6가지 폰트의 실제 글씨체를 비교합니다:")
+        for f_name in FONT_MAP.keys():
+            st.markdown(f"<div style='font-size:0.83rem; font-weight:600; color:#cbd5e1; margin-top:8px; margin-bottom:3px;'>· {f_name}</div>", unsafe_allow_html=True)
+            st.image(get_font_preview_image(f_name, selected_pen), use_container_width=True)
+
     
     layout_mode = st.radio(
         "합성 레이아웃 모드",
@@ -591,21 +625,17 @@ with col_upload:
     </div>
     """, unsafe_allow_html=True)
 
-    # 빠른 액션 툴바 (캡처 붙여넣기 및 샘플 불러오기)
-    col_p, col_s = st.columns([1.3, 1], gap="small")
-    with col_p:
-        if paste_image_button is not None:
-            paste_result = paste_image_button(
-                label="📋 화면 캡처 붙여넣기 (Ctrl+V)",
-                background_color="#4F46E5",
-                hover_background_color="#4338CA",
-                errors="ignore",
-                key="clipboard_paste_btn"
-            )
-        else:
-            paste_result = None
-    with col_s:
-        use_sample_btn = st.button("📄 샘플 문제 불러오기", use_container_width=True, key="btn_load_sample")
+    # 화면 캡처 클립보드 붙여넣기
+    if paste_image_button is not None:
+        paste_result = paste_image_button(
+            label="📋 화면 캡처 붙여넣기 (Ctrl+V)",
+            background_color="#4F46E5",
+            hover_background_color="#4338CA",
+            errors="ignore",
+            key="clipboard_paste_btn"
+        )
+    else:
+        paste_result = None
 
     uploaded_file = st.file_uploader(
         "또는 문제집/시험지 사진을 직접 업로드하세요",
@@ -623,11 +653,6 @@ with col_upload:
     elif uploaded_file is not None:
         st.session_state["active_img_bytes"] = uploaded_file.getvalue()
         st.session_state["source_type"] = "uploaded"
-    elif use_sample_btn or ("source_type" in st.session_state and "active_img_bytes" not in st.session_state):
-        if os.path.exists(sample_img_path):
-            with open(sample_img_path, "rb") as f:
-                st.session_state["active_img_bytes"] = f.read()
-            st.session_state["source_type"] = "sample"
 
     current_image = None
     image_bytes = st.session_state.get("active_img_bytes", None)
@@ -667,14 +692,17 @@ with col_preview:
     composer = get_composer()
     
     if generate_btn and current_image and image_bytes:
-        with st.spinner("AI가 문제를 정밀 분석하여 손글씨 필기 노트를 렌더링 중입니다..."):
-            active_key = None if use_mock else api_key_input
-            solution_data = solve_problem_with_gemini(
-                image_bytes=image_bytes,
-                mime_type="image/png",
-                api_key=active_key
-            )
-            time.sleep(0.3)
+        if not api_key_input:
+            st.error("❌ Gemini API 키가 설정되지 않았습니다.")
+            st.warning("⚠️ 좌측 사이드바의 **[🔑 Gemini AI 엔진 설정]**에서 무료 API 키를 등록해주세요.")
+        else:
+            with st.spinner("AI가 문제를 정밀 분석하여 손글씨 필기 노트를 렌더링 중입니다..."):
+                solution_data = solve_problem_with_gemini(
+                    image_bytes=image_bytes,
+                    mime_type="image/png",
+                    api_key=api_key_input
+                )
+                time.sleep(0.3)
             
             if solution_data.get("error"):
                 st.error(f"❌ AI 문제 풀이 오류: {solution_data.get('error_message')}")
