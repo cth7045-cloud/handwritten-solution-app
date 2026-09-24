@@ -61,6 +61,12 @@ def init_db():
     )
     """)
     
+    # 3. users 테이블 api_key 컬럼 마이그레이션
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN api_key TEXT DEFAULT ''")
+    except Exception:
+        pass
+
     conn.commit()
     
     # 3. 최고 관리자 계정 생성 및 암호화 설정 (갈빙)
@@ -199,6 +205,25 @@ def get_system_setting(key: str, default: str = "") -> str:
     row = cursor.fetchone()
     conn.close()
     return row["value"] if row else default
+
+def save_user_api_key(username: str, api_key: str):
+    """사용자의 Gemini API 키를 계정별로 영구 저장합니다."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET api_key = ? WHERE username = ?", (api_key.strip(), username))
+    conn.commit()
+    conn.close()
+
+def get_user_api_key(username: str) -> str:
+    """사용자의 저장된 Gemini API 키를 조회합니다."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT api_key FROM users WHERE username = ?", (username,))
+    row = cursor.fetchone()
+    conn.close()
+    if row and "api_key" in row.keys() and row["api_key"]:
+        return row["api_key"]
+    return ""
 
 # 초기화 실행
 init_db()

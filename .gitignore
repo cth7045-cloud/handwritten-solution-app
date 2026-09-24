@@ -20,3 +20,12 @@ data/*.db
 data/
 .DS_Store
 Thumbs.db
+.streamlit/
+portable_tools/
+deploy_*.py
+setup_*.py
+fix_*.py
+create_*.py
+start_server.py
+test_synthesis.py
+

@@ -46,7 +46,8 @@ def get_composer():
 from core.auth_manager import (
     register_user, authenticate_user, get_all_users,
     update_user_status, increment_solve_count, change_password,
-    get_system_setting, set_system_setting
+    get_system_setting, set_system_setting,
+    save_user_api_key, get_user_api_key
 )
 
 # ----------------- 로그인 / 회원가입 게이트 -----------------
@@ -171,20 +172,10 @@ with st.sidebar:
         except Exception:
             pass
     
-    # 1. 브라우저 localStorage 동기화 컴포넌트 선언
-    key_store_path = os.path.join(os.path.dirname(__file__), "components", "key_store")
-    saved_browser_key = ""
-    if os.path.exists(key_store_path):
-        try:
-            _key_store_comp = st.components.v1.declare_component("key_store", path=key_store_path)
-            saved_browser_key = _key_store_comp(save_key=st.session_state.get("pending_save_key", ""), default="")
-        except Exception:
-            pass
-
-    # 2. 저장된 키 불러오기 (우선순위: session_state > localStorage > global_setting > secrets > env)
-    stored_key = st.session_state.get("gemini_api_key", "")
-    if not stored_key and saved_browser_key:
-        stored_key = saved_browser_key
+    # 저장된 키 불러오기 (우선순위: 사용자 계정 DB > 관리자 공용 키 > secrets.toml > 환경변수)
+    stored_key = ""
+    if uname:
+        stored_key = get_user_api_key(uname)
     if not stored_key:
         stored_key = get_system_setting("GLOBAL_GEMINI_API_KEY", "")
     if not stored_key:
@@ -209,7 +200,7 @@ with st.sidebar:
 
     st.subheader("🔑 Gemini API 설정")
     default_mock = False if stored_key else True
-    use_mock = st.checkbox("샘플 모드로 바로 테스트하기 (키 불필요)", value=default_mock)
+    use_mock = st.checkbox("샘플 모드로 바로 테스트하기 (키 불필요)", value=default_mock, key="chk_use_mock")
     
     api_key_input = stored_key
     if not use_mock:
@@ -218,25 +209,33 @@ with st.sidebar:
             value=stored_key,
             type="password",
             placeholder="AI Studio에서 발급받은 무료 키 입력",
-            help="Google AI Studio(aistudio.google.com)에서 무료로 즉시 발급 가능합니다."
+            help="Google AI Studio(aistudio.google.com)에서 무료로 즉시 발급 가능합니다.",
+            key="inp_user_gemini_key"
         )
-        api_key_input = new_key.strip() if new_key else ""
+        val = new_key.strip() if new_key else ""
         
-        # 새 키가 입력되었거나 변경된 경우 즉시 영구 저장
-        if api_key_input and api_key_input != stored_key:
-            st.session_state["gemini_api_key"] = api_key_input
-            st.session_state["pending_save_key"] = api_key_input
-            os.environ["GEMINI_API_KEY"] = api_key_input
+        # 새 키가 입력되었거나 변경된 경우 계정 DB 및 로컬 환경에 즉시 영구 저장
+        if val and val != stored_key:
+            if uname:
+                save_user_api_key(uname, val)
+            os.environ["GEMINI_API_KEY"] = val
             try:
                 os.makedirs(os.path.dirname(local_secrets), exist_ok=True)
                 with open(local_secrets, "w", encoding="utf-8") as f:
-                    f.write(f'GEMINI_API_KEY = "{api_key_input}"\n')
+                    f.write(f'GEMINI_API_KEY = "{val}"\n')
             except Exception:
                 pass
-            st.rerun()
+            stored_key = val
+        elif not val and stored_key:
+            # 사용자가 키를 비운 경우
+            if uname:
+                save_user_api_key(uname, "")
+            stored_key = ""
+        
+        api_key_input = stored_key
 
         if api_key_input:
-            st.success("✅ API 키가 저장되었습니다! (다음 접속 시에도 자동 유지)")
+            st.success("✅ API 키가 계정에 안전하게 저장되었습니다! (재접속해도 자동 유지)")
         else:
             st.warning("⚠️ 사진 속 진짜 문제를 풀려면 API 키를 입력해주세요.")
         st.caption("👉 [Google AI Studio에서 무료 키 받기](https://aistudio.google.com/apikey)")
