@@ -8,6 +8,20 @@ import time
 from PIL import Image, ImageDraw
 import streamlit as st
 
+import importlib
+import core.handwriting_engine
+import core.diagram_engine
+import core.overlay_composer
+import core.gemini_solver
+
+try:
+    importlib.reload(core.handwriting_engine)
+    importlib.reload(core.diagram_engine)
+    importlib.reload(core.overlay_composer)
+    importlib.reload(core.gemini_solver)
+except Exception:
+    pass
+
 from core.handwriting_engine import HandwritingEngine, FONT_MAP, PEN_STYLES
 from core.overlay_composer import OverlayComposer, POSTIT_COLORS
 from core.gemini_solver import solve_problem_with_gemini, format_model_name
@@ -720,12 +734,35 @@ with col_preview:
             st.warning("⚠️ 좌측 사이드바의 **[🔑 Gemini AI 엔진 설정]**에서 무료 API 키를 등록해주세요.")
         else:
             with st.spinner("AI가 문제를 정밀 분석하여 손글씨 필기 노트를 렌더링 중입니다..."):
-                solution_data = solve_problem_with_gemini(
-                    image_bytes=image_bytes,
-                    mime_type="image/png",
-                    api_key=api_key_input,
-                    solve_style=solve_style
-                )
+                try:
+                    solution_data = solve_problem_with_gemini(
+                        image_bytes=image_bytes,
+                        mime_type="image/png",
+                        api_key=api_key_input,
+                        solve_style=solve_style
+                    )
+                except TypeError:
+                    try:
+                        import importlib
+                        import core.gemini_solver
+                        importlib.reload(core.gemini_solver)
+                        solution_data = core.gemini_solver.solve_problem_with_gemini(
+                            image_bytes=image_bytes,
+                            mime_type="image/png",
+                            api_key=api_key_input,
+                            solve_style=solve_style
+                        )
+                    except Exception:
+                        solution_data = solve_problem_with_gemini(
+                            image_bytes=image_bytes,
+                            mime_type="image/png",
+                            api_key=api_key_input
+                        )
+                except Exception as ex:
+                    solution_data = {
+                        "error": True,
+                        "error_message": f"AI 분석 호출 중 오류: {ex}"
+                    }
                 time.sleep(0.3)
             
             if solution_data.get("error"):

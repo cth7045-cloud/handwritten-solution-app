@@ -122,7 +122,9 @@ class OverlayComposer:
         base_img: Image.Image,
         solution_data: Dict[str, Any],
         font_name: str,
-        pen_style: str
+        pen_style: str,
+        *args,
+        **kwargs
     ) -> Image.Image:
         """
         일반 시험지/문제집의 자연스러운 빈 공간에 직접 손글씨를 적은 것처럼 합성합니다.
@@ -333,7 +335,9 @@ class OverlayComposer:
         solution_data: Dict[str, Any],
         font_name: str,
         pen_style: str,
-        postit_color_name: str = "노란색"
+        postit_color_name: str = "노란색",
+        *args,
+        **kwargs
     ) -> Image.Image:
         """
         문제 지문을 가리지 않도록 포스트잇 메모지를 합성합니다.
@@ -514,7 +518,9 @@ class OverlayComposer:
         base_img: Image.Image,
         solution_data: Dict[str, Any],
         font_name: str,
-        pen_style: str
+        pen_style: str,
+        *args,
+        **kwargs
     ) -> Image.Image:
         """
         원본 이미지 우측에 모눈종이(그리드 노트) 영역을 확장하여 넉넉하게 풀이를 작성합니다.

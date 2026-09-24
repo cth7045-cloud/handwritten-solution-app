@@ -41,13 +41,18 @@ def solve_problem_with_gemini(
     image_bytes: bytes,
     mime_type: str = "image/png",
     api_key: Optional[str] = None,
-    solve_style: str = "killer_tutor"
+    solve_style: str = "killer_tutor",
+    *args,
+    **kwargs
 ) -> Dict[str, Any]:
     """
     Gemini API를 호출하여 이미지 속 문제를 풀이합니다.
     API 키가 없거나 미등록 시 명확한 에러 안내를 반환합니다.
     solve_style: 'killer_tutor' (수능 1타 강사 실전 압축 풀이) | 'standard_concept' (친절한 개념 정석 풀이)
     """
+    if "solve_style" in kwargs:
+        solve_style = kwargs["solve_style"]
+
     secret_key = ""
     try:
         import streamlit as st
