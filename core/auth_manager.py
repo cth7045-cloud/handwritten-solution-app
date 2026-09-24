@@ -63,17 +63,26 @@ def init_db():
     
     conn.commit()
     
-    # 3. 기본 관리자 계정 생성 (cth7045 및 admin)
+    # 3. 최고 관리자 계정 생성 및 암호화 설정 (갈빙)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for admin_user in ["cth7045", "admin"]:
-        cursor.execute("SELECT id FROM users WHERE username = ?", (admin_user,))
-        if not cursor.fetchone():
-            pw_hash, salt = hash_password("admin1234")
-            cursor.execute("""
-            INSERT INTO users (username, password_hash, salt, role, is_active, solve_count, created_at)
-            VALUES (?, ?, ?, 'admin', 1, 0, ?)
-            """, (admin_user, pw_hash, salt, now))
-            print(f"[*] 기본 관리자 계정 생성 완료: {admin_user}")
+    admin_user = "갈빙"
+    admin_pw = "lhy8200@"
+    pw_hash, salt = hash_password(admin_pw)
+    
+    cursor.execute("SELECT id FROM users WHERE username = ?", (admin_user,))
+    row = cursor.fetchone()
+    if not row:
+        cursor.execute("""
+        INSERT INTO users (username, password_hash, salt, role, is_active, solve_count, created_at)
+        VALUES (?, ?, ?, 'admin', 1, 0, ?)
+        """, (admin_user, pw_hash, salt, now))
+    else:
+        cursor.execute("""
+        UPDATE users SET password_hash = ?, salt = ?, role = 'admin', is_active = 1 WHERE username = ?
+        """, (pw_hash, salt, admin_user))
+
+    # 이전 임시 계정 정리
+    cursor.execute("DELETE FROM users WHERE username IN ('cth7045', 'admin')")
             
     conn.commit()
     conn.close()
@@ -81,8 +90,8 @@ def init_db():
 def register_user(username: str, password: str, role: str = "user") -> Tuple[bool, str]:
     """신규 회원가입"""
     username = username.strip()
-    if not username or len(username) < 3:
-        return False, "아이디는 최소 3자 이상이어야 합니다."
+    if not username or len(username) < 2:
+        return False, "아이디는 최소 2자 이상이어야 합니다."
     if not password or len(password) < 4:
         return False, "비밀번호는 최소 4자 이상이어야 합니다."
         

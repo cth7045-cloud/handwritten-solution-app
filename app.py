@@ -72,13 +72,10 @@ if not st.session_state.get("user"):
                     st.rerun()
                 else:
                     st.error(msg)
-                    
-            st.markdown("---")
-            st.info("👑 **관리자 안내**: 초기 관리자 계정 아이디 `cth7045` (또는 `admin`) / 비밀번호 `admin1234`")
 
         with tab_signup:
             st.subheader("신규 회원가입")
-            new_id = st.text_input("희망 아이디 (3자 이상)", key="signup_id_input")
+            new_id = st.text_input("희망 아이디 (2자 이상)", key="signup_id_input")
             new_pw = st.text_input("비밀번호 (4자 이상)", type="password", key="signup_pw_input")
             new_pw_conf = st.text_input("비밀번호 확인", type="password", key="signup_pw_conf_input")
             
