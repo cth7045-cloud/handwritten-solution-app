@@ -82,10 +82,74 @@ def solve_problem_with_gemini(
 업로드된 문제집/교재 사진 속 문제를 파악하고, 학생이 공책에 적어둔 것처럼 친근하고 명확한 손글씨 풀이 노트를 작성해야 합니다.
 손글씨 필기용이므로 각 단계는 한두 줄 이내로 깔끔하게 정리해주시고, 복잡한 LaTeX 대신 공책에 손글씨로 적기 편한 명확한 기호(예: +, -, *, /, ^2, =>, <=>, v, ^, ~ 등)를 주로 사용해주세요.
 
+[★ 시각적 그래프 및 다이어그램 적극 활용 지침 ★]
+학생들의 직관적 이해를 돕기 위해, 문제가 함수, 부등식, 기하, 집합, 확률 등 시각화가 가능한 경우 **반드시 적극적으로 "has_diagram": true와 함께 "diagram" 객체를 작성해주세요.**
+시스템의 손글씨 다이어그램 엔진이 이를 학생이 펜으로 직접 그린 듯한 자연스러운 스케치로 자동 렌더링합니다.
+
+지원되는 diagram_type 및 작성 규격:
+1. "coordinate_plane" (함수 그래프, 이차함수, 삼각함수, 지수로그, 미적분 접선/극값/정적분 넓이 등):
+{
+    "diagram_type": "coordinate_plane",
+    "title": "그래프 소제목 (예: y = x^2 - 4x + 3)",
+    "x_range": [-1, 5],
+    "y_range": [-2, 6],
+    "functions": [
+        {"expr": "x**2 - 4*x + 3", "color": "blue", "label": "y = f(x)"}
+    ],
+    "points": [
+        {"x": 2, "y": -1, "label": "(2, -1)", "dashed": true},
+        {"x": 1, "y": 0, "label": "1"},
+        {"x": 3, "y": 0, "label": "3"}
+    ],
+    "shaded_region": { "x_min": 1, "x_max": 3, "y_lower": "0", "y_upper": "x**2 - 4*x + 3" } // 적분/둘러싸인 영역 시
+}
+* expr 작성 시 Python/NumPy 문법을 사용하세요 (예: x**2 - 4*x + 3, 2*x + 1, np.sin(x), -(x-2)**2 + 4 등). color는 "blue", "red", "black" 지원.
+
+2. "number_line" (일차/이차 부등식의 해 영역, 수의 범위 등):
+{
+    "diagram_type": "number_line",
+    "title": "부등식의 해 영역",
+    "x_range": [-2, 6],
+    "intervals": [
+        {"start": 1, "end": 4, "start_closed": false, "end_closed": true, "label": "1 < x <= 4"}
+    ]
+}
+
+3. "geometry" (삼각형, 사각형, 원 등 기하 문제):
+{
+    "diagram_type": "geometry",
+    "shape": "triangle",
+    "title": "직각삼각형 ABC",
+    "labels": {"A": "A", "B": "B", "C": "C", "c": "빗변", "angle_B": "90°"}
+}
+
+4. "venn" (집합 연산, 포함 관계, 합집합/교집합 등):
+{
+    "diagram_type": "venn",
+    "title": "집합 A, B의 연산",
+    "labels": {"A": "A", "B": "B", "intersection": "A∩B"},
+    "highlight": "intersection"
+}
+
+* 순수 단순 텍스트 풀이만으로 충분하고 시각적 요소가 전혀 불필요한 경우에만 "has_diagram": false, "diagram": null 로 지정하세요. 그 외 함수, 부등식, 기하, 집합 등 조금이라도 시각화가 유익하면 무조건 diagram을 포함하세요!
+
 반드시 아래 JSON 형식으로만 응답해주세요. 마크다운 ```json ... ``` 태그 없이 순수 JSON 문자열만 출력하세요:
 {
-    "problem_title": "문제 유형이나 소제목 (예: 명제 논리식의 증명)",
+    "problem_title": "문제 유형이나 소제목 (예: 이차함수의 최솟값과 그래프)",
     "problem_summary": "인식한 문제 내용 한두 줄 요약",
+    "has_diagram": true,
+    "diagram": {
+        "diagram_type": "coordinate_plane",
+        "title": "y = x^2 - 4x + 3",
+        "x_range": [-1, 5],
+        "y_range": [-2, 6],
+        "functions": [
+            {"expr": "x**2 - 4*x + 3", "color": "blue", "label": "y = f(x)"}
+        ],
+        "points": [
+            {"x": 2, "y": -1, "label": "(2, -1)", "dashed": true}
+        ]
+    },
     "steps": [
         "1. 단계별 풀이 첫 번째 줄",
         "   상세 계산 과정 및 식",
@@ -96,6 +160,7 @@ def solve_problem_with_gemini(
     "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트"
 }
 """
+
         # 기본 우선순위 모델 목록 (최고 성능 플래그십 순서)
         base_priority = [
             "gemini-3.8-flash",

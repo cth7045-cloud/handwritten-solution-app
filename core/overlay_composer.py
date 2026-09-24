@@ -8,6 +8,7 @@ from typing import Dict, Any, Tuple, Optional, List
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 from .handwriting_engine import HandwritingEngine
+from .diagram_engine import HandwrittenDiagramEngine
 
 POSTIT_COLORS = {
     "노란색": (255, 250, 195),
@@ -68,6 +69,7 @@ def detect_content_bounds(base_img: Image.Image) -> Tuple[int, int, int, int]:
 class OverlayComposer:
     def __init__(self, engine: HandwritingEngine):
         self.engine = engine
+        self.diagram_engine = HandwrittenDiagramEngine(engine)
 
     def compose_margin_mode(
         self,
@@ -80,6 +82,7 @@ class OverlayComposer:
         일반 시험지/문제집의 자연스러운 빈 공간에 직접 손글씨를 적은 것처럼 합성합니다.
         문제가 꽉 차있거나 좁게 크롭된 경우(스크린샷 등) 캔버스를 여유롭게 확장하여
         글씨가 삐져나오거나 잘리지 않고 고품질 학습 노트 형태로 완성되도록 보장합니다.
+        그래프나 다이어그램이 있을 경우 최적의 위치에 자연스럽게 함께 렌더링합니다.
         """
         orig_w, orig_h = base_img.size
         min_x, min_y, max_x, max_y = detect_content_bounds(base_img)
@@ -88,14 +91,30 @@ class OverlayComposer:
         min_comfortable_w = 860
         target_w = max(orig_w, min_comfortable_w)
 
+        # 다이어그램 렌더링 시도
+        diag_img = None
+        diagram_data = solution_data.get("diagram")
+        if diagram_data and (solution_data.get("has_diagram") or isinstance(diagram_data, dict)):
+            try:
+                diag_max_w = 420 if target_w >= 920 else min(target_w - 110, 420)
+                diag_img = self.diagram_engine.render_diagram(diagram_data, font_name, pen_style, max_width=diag_max_w)
+            except Exception as e:
+                print(f"[!] 다이어그램 렌더링 오류: {e}")
+                diag_img = None
+
+        is_side_by_side = (diag_img is not None and target_w >= 920)
+
         # 폰트 크기 및 행간
         font_size = max(21, min(26, int(target_w * 0.026)))
         line_spacing = int(font_size * 0.45)
         
-        # 가로 래핑 최대 너비 (좌우 여백 확보)
-        max_wrap_w = target_w - 120
+        # 가로 래핑 최대 너비
+        if is_side_by_side:
+            max_wrap_w = target_w - diag_img.width - 130
+        else:
+            max_wrap_w = target_w - 120
 
-        # 풀이 텍스트 라인 구성 - 모든 제목, 정답, 팁을 예외 없이 철저하게 wrap_text 처리!
+        # 풀이 텍스트 라인 구성
         lines_to_draw: List[str] = []
         title = solution_data.get("problem_title", "")
         if title:
@@ -115,8 +134,14 @@ class OverlayComposer:
             lines_to_draw.append("")
             lines_to_draw.extend(self.engine.wrap_text(f"★ 핵심 Tip: {tip}", font_name, font_size, max_wrap_w))
 
-        # 전체 텍스트가 차지할 총 높이 (넉넉한 여백 80px)
-        total_text_h = len(lines_to_draw) * (font_size + line_spacing) + 80
+        # 전체 높이 계산
+        text_block_h = len(lines_to_draw) * (font_size + line_spacing)
+        if is_side_by_side:
+            total_text_h = max(text_block_h, diag_img.height) + 80
+        elif diag_img is not None:
+            total_text_h = text_block_h + diag_img.height + 100
+        else:
+            total_text_h = text_block_h + 80
 
         # 배경색 추출
         bg_rgb = sample_background_color(base_img)
@@ -124,14 +149,11 @@ class OverlayComposer:
         # 2. 원본 이미지가 이미 넓고(>=860px) 하단 여백이 텍스트를 담기에 충분한지 검사
         bottom_space = max(0, orig_h - max_y - 20)
         if orig_w >= min_comfortable_w and bottom_space >= total_text_h + 40:
-            # 원본 시험지 내부 여백에 직접 기입
             working_img = base_img.convert("RGBA")
             start_x = max(int(orig_w * 0.07), min_x)
             start_y = max_y + 28
         else:
-            # 좁게 크롭된 캡처이거나 하단 여백이 부족한 경우 -> 깔끔한 학습 노트 캔버스 생성
             if orig_w < min_comfortable_w:
-                # 좁은 이미지: 상단에 문제 카드 형태로 깔끔하게 배치 (필기와 좌측 정렬 통일)
                 img_x = 55
                 img_y = 25
                 div_y = img_y + orig_h + 20
@@ -142,12 +164,10 @@ class OverlayComposer:
                 working_img = Image.new("RGBA", (target_w, total_h), bg_rgb + (255,))
                 working_img.paste(base_img.convert("RGBA"), (img_x, img_y))
 
-                # 문제 카드 테두리 및 구분선
                 draw = ImageDraw.Draw(working_img)
                 draw.rectangle([img_x - 1, img_y - 1, img_x + orig_w, img_y + orig_h], outline=(225, 230, 238, 220), width=1)
                 draw.line([(45, div_y), (target_w - 45, div_y)], fill=(215, 222, 232, 220), width=1)
             else:
-                # 원본 너비는 충분하지만 세로 길이가 부족한 경우: 아래로 확장
                 new_h = orig_h + total_text_h + 80
                 working_img = Image.new("RGBA", (orig_w, new_h), bg_rgb + (255,))
                 working_img.paste(base_img.convert("RGBA"), (0, 0))
@@ -159,19 +179,75 @@ class OverlayComposer:
                 start_x = int(orig_w * 0.07)
                 start_y = div_y + 36
 
-        # 손글씨 렌더링
-        result, end_pos = self.engine.draw_handwritten_text(
-            base_img=working_img,
-            text_lines=lines_to_draw,
-            start_pos=(start_x, start_y),
-            font_name=font_name,
-            font_size=font_size,
-            pen_style_name=pen_style,
-            line_spacing=line_spacing,
-            apply_jitter=True
-        )
-
-        return result.convert("RGB")
+        # 손글씨 및 다이어그램 합성 렌더링
+        if is_side_by_side:
+            result, end_pos = self.engine.draw_handwritten_text(
+                base_img=working_img,
+                text_lines=lines_to_draw,
+                start_pos=(start_x, start_y),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
+            diag_x = target_w - diag_img.width - 50
+            diag_y = start_y + 8
+            result.alpha_composite(diag_img, (diag_x, diag_y))
+            return result.convert("RGB")
+        elif diag_img is not None:
+            title_lines = []
+            if title:
+                title_lines.extend(self.engine.wrap_text(f"<{title}>", font_name, font_size, max_wrap_w))
+                title_lines.append("")
+            
+            result, end_pos = self.engine.draw_handwritten_text(
+                base_img=working_img,
+                text_lines=title_lines,
+                start_pos=(start_x, start_y),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
+            diag_x = max(start_x, (target_w - diag_img.width) // 2)
+            diag_y = end_pos[1] + 12
+            result.alpha_composite(diag_img, (diag_x, diag_y))
+            
+            remaining_lines = []
+            for step in solution_data.get("steps", []):
+                remaining_lines.extend(self.engine.wrap_text(step, font_name, font_size, max_wrap_w))
+            if ans:
+                remaining_lines.append("")
+                remaining_lines.extend(self.engine.wrap_text(f"∴ 정답: {ans}", font_name, font_size, max_wrap_w))
+            if tip:
+                remaining_lines.append("")
+                remaining_lines.extend(self.engine.wrap_text(f"★ 핵심 Tip: {tip}", font_name, font_size, max_wrap_w))
+                
+            result, end_pos = self.engine.draw_handwritten_text(
+                base_img=result,
+                text_lines=remaining_lines,
+                start_pos=(start_x, diag_y + diag_img.height + 18),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
+            return result.convert("RGB")
+        else:
+            result, end_pos = self.engine.draw_handwritten_text(
+                base_img=working_img,
+                text_lines=lines_to_draw,
+                start_pos=(start_x, start_y),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
+            return result.convert("RGB")
 
     def compose_postit_mode(
         self,
@@ -213,8 +289,23 @@ class OverlayComposer:
             lines_to_draw.append("")
             lines_to_draw.extend(self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, wrap_w))
 
+        # 다이어그램 렌더링 시도
+        diag_img = None
+        diagram_data = solution_data.get("diagram")
+        if diagram_data and (solution_data.get("has_diagram") or isinstance(diagram_data, dict)):
+            try:
+                diag_max_w = min(postit_w - 60, 420)
+                diag_img = self.diagram_engine.render_diagram(diagram_data, font_name, pen_style, max_width=diag_max_w)
+            except Exception as e:
+                print(f"[!] 포스트잇 다이어그램 렌더링 오류: {e}")
+                diag_img = None
+
         tape_h = 32
-        postit_h = max(340, len(lines_to_draw) * (font_size + line_spacing) + tape_h + 70)
+        text_block_h = len(lines_to_draw) * (font_size + line_spacing)
+        if diag_img:
+            postit_h = max(380, text_block_h + diag_img.height + tape_h + 80)
+        else:
+            postit_h = max(340, text_block_h + tape_h + 70)
 
         bg_rgb = POSTIT_COLORS.get(postit_color_name, (255, 250, 195))
 
@@ -226,16 +317,56 @@ class OverlayComposer:
         darker_color = (max(0, bg_rgb[0] - 20), max(0, bg_rgb[1] - 20), max(0, bg_rgb[2] - 20), 180)
         draw.rectangle([0, 0, postit_w, tape_h], fill=darker_color)
 
-        postit_with_text, end_pos = self.engine.draw_handwritten_text(
-            base_img=postit,
-            text_lines=lines_to_draw,
-            start_pos=(30, tape_h + 20),
-            font_name=font_name,
-            font_size=font_size,
-            pen_style_name=pen_style,
-            line_spacing=line_spacing,
-            apply_jitter=True
-        )
+        if diag_img is not None:
+            title_lines = []
+            if title:
+                title_lines.extend(self.engine.wrap_text(f"[풀이] {title}", font_name, font_size, wrap_w))
+                title_lines.append("")
+            postit_with_text, end_pos = self.engine.draw_handwritten_text(
+                base_img=postit,
+                text_lines=title_lines,
+                start_pos=(30, tape_h + 20),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
+            diag_x = max(20, (postit_w - diag_img.width) // 2)
+            diag_y = end_pos[1] + 8
+            postit_with_text.alpha_composite(diag_img, (int(diag_x), int(diag_y)))
+            
+            remaining_lines = []
+            for step in solution_data.get("steps", []):
+                remaining_lines.extend(self.engine.wrap_text(step, font_name, font_size, wrap_w))
+            if ans:
+                remaining_lines.append("")
+                remaining_lines.extend(self.engine.wrap_text(f"정답: {ans}", font_name, font_size, wrap_w))
+            if tip:
+                remaining_lines.append("")
+                remaining_lines.extend(self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, wrap_w))
+
+            postit_with_text, end_pos = self.engine.draw_handwritten_text(
+                base_img=postit_with_text,
+                text_lines=remaining_lines,
+                start_pos=(30, int(diag_y + diag_img.height + 15)),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
+        else:
+            postit_with_text, end_pos = self.engine.draw_handwritten_text(
+                base_img=postit,
+                text_lines=lines_to_draw,
+                start_pos=(30, tape_h + 20),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
 
         # 그림자 및 자연스러운 미세 회전
         angle = random.uniform(-1.0, 1.0)
@@ -287,6 +418,7 @@ class OverlayComposer:
         """
         원본 이미지 우측에 모눈종이(그리드 노트) 영역을 확장하여 넉넉하게 풀이를 작성합니다.
         풀이 길이에 맞춰 세로 높이도 지능적으로 조절합니다.
+        그래프가 있을 경우 모눈종이 위에 자연스러운 손글씨 필기풍으로 함께 렌더링합니다.
         """
         orig_w, orig_h = base_img.size
         # 모눈노트 확장 너비: 최소 650px을 주어 수식과 풀이가 시원하게 들어가도록 보장
@@ -317,7 +449,23 @@ class OverlayComposer:
             lines_to_draw.append("")
             lines_to_draw.extend(self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, wrap_w))
 
-        total_text_h = len(lines_to_draw) * (font_size + line_spacing) + 120
+        # 다이어그램 렌더링 시도
+        diag_img = None
+        diagram_data = solution_data.get("diagram")
+        if diagram_data and (solution_data.get("has_diagram") or isinstance(diagram_data, dict)):
+            try:
+                diag_max_w = min(ext_w - 70, 440)
+                diag_img = self.diagram_engine.render_diagram(diagram_data, font_name, pen_style, max_width=diag_max_w)
+            except Exception as e:
+                print(f"[!] 모눈노트 다이어그램 렌더링 오류: {e}")
+                diag_img = None
+
+        text_block_h = len(lines_to_draw) * (font_size + line_spacing)
+        if diag_img:
+            total_text_h = text_block_h + diag_img.height + 140
+        else:
+            total_text_h = text_block_h + 120
+
         new_h = max(orig_h, total_text_h)
         new_w = orig_w + ext_w
 
@@ -342,16 +490,60 @@ class OverlayComposer:
 
         result.alpha_composite(grid_overlay, (orig_w, 0))
 
-        result_with_text, end_pos = self.engine.draw_handwritten_text(
-            base_img=result,
-            text_lines=lines_to_draw,
-            start_pos=(orig_w + 35, 40),
-            font_name=font_name,
-            font_size=font_size,
-            pen_style_name=pen_style,
-            line_spacing=line_spacing,
-            apply_jitter=True
-        )
+        if diag_img is not None:
+            head_lines = [
+                "📝 [선생님 손글씨 풀이 노트]",
+                "────────────────────────",
+            ]
+            if title:
+                head_lines.extend(self.engine.wrap_text(f"문제: {title}", font_name, font_size, wrap_w))
+                head_lines.append("")
 
-        return result_with_text.convert("RGB")
+            result_with_text, end_pos = self.engine.draw_handwritten_text(
+                base_img=result,
+                text_lines=head_lines,
+                start_pos=(orig_w + 35, 40),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
+            diag_x = orig_w + max(20, (ext_w - diag_img.width) // 2)
+            diag_y = end_pos[1] + 12
+            result_with_text.alpha_composite(diag_img, (int(diag_x), int(diag_y)))
+
+            remaining_lines = []
+            for step in solution_data.get("steps", []):
+                remaining_lines.extend(self.engine.wrap_text(step, font_name, font_size, wrap_w))
+            if ans:
+                remaining_lines.append("")
+                remaining_lines.extend(self.engine.wrap_text(f"★ 정답: {ans}", font_name, font_size, wrap_w))
+            if tip:
+                remaining_lines.append("")
+                remaining_lines.extend(self.engine.wrap_text(f"Tip: {tip}", font_name, font_size, wrap_w))
+
+            result_with_text, end_pos = self.engine.draw_handwritten_text(
+                base_img=result_with_text,
+                text_lines=remaining_lines,
+                start_pos=(orig_w + 35, int(diag_y + diag_img.height + 16)),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
+            return result_with_text.convert("RGB")
+        else:
+            result_with_text, end_pos = self.engine.draw_handwritten_text(
+                base_img=result,
+                text_lines=lines_to_draw,
+                start_pos=(orig_w + 35, 40),
+                font_name=font_name,
+                font_size=font_size,
+                pen_style_name=pen_style,
+                line_spacing=line_spacing,
+                apply_jitter=True
+            )
+            return result_with_text.convert("RGB")
 
