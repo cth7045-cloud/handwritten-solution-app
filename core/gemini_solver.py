@@ -89,9 +89,15 @@ def solve_problem_with_gemini(
             temperature=0.2
         )
 
-        # 지원 모델 순차 시도 (안정적인 2.5-flash -> 2.0-flash -> 1.5-flash -> 3.8-flash)
-        candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.8-flash"]
+        # 최고 성능 모델부터 순환 시도 (최상위 지능 3.8-flash -> 최고 추론 2.5-pro -> 고속 추론 2.5-flash -> 2.0-flash)
+        candidate_models = [
+            "gemini-3.8-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash"
+        ]
         response = None
+        used_model = None
         last_err = None
 
         for model_code in candidate_models:
@@ -105,6 +111,7 @@ def solve_problem_with_gemini(
                     config=config
                 )
                 if response and response.text:
+                    used_model = model_code
                     break
             except Exception as err:
                 last_err = err
@@ -112,7 +119,7 @@ def solve_problem_with_gemini(
                 continue
 
         if not response or not response.text:
-            raise Exception(f"AI 모델 응답을 받지 못했습니다. (원인: {last_err})")
+            raise Exception(f"AI 모델 응답을 받지 못했습니다. (마지막 시도 에러: {last_err})")
         
         text_output = response.text.strip()
         
@@ -125,6 +132,7 @@ def solve_problem_with_gemini(
             json_str = text_output
             
         result = json.loads(json_str)
+        result["used_model"] = used_model
         return result
 
     except Exception as e:

@@ -410,8 +410,11 @@ with col_preview:
         )
         
         # 상세 풀이 텍스트 아코디언
-        with st.expander("📝 텍스트 풀이 상세 보기"):
+        with st.expander("📝 텍스트 풀이 및 사용 모델 상세 보기"):
             data = st.session_state.get("solution_data", {})
+            used_m = data.get("used_model")
+            if used_m:
+                st.success(f"🤖 **풀이에 사용된 AI 모델**: `{used_m}` (최고 성능 순 적용)")
             st.markdown(f"**문제:** {data.get('problem_title', '')}")
             st.markdown(f"**요약:** {data.get('problem_summary', '')}")
             st.markdown("**풀이 단계:**")
