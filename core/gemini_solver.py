@@ -48,7 +48,13 @@ def solve_problem_with_gemini(
     API 키가 없거나 미등록 시 명확한 에러 안내를 반환합니다.
     solve_style: 'killer_tutor' (수능 1타 강사 실전 압축 풀이) | 'standard_concept' (친절한 개념 정석 풀이)
     """
-    key = (api_key or os.environ.get("GEMINI_API_KEY", "")).strip()
+    secret_key = ""
+    try:
+        import streamlit as st
+        secret_key = st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        pass
+    key = (api_key or os.environ.get("GEMINI_API_KEY", "") or secret_key).strip()
     
     if not key:
         return {
