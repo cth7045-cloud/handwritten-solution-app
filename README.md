@@ -85,6 +85,20 @@ uvicorn server.main:app --reload --port 8000
 
 Cloud Run 컨테이너는 재시작하면 내부 파일이 사라지므로, 회원·기록은 외부 PostgreSQL에 저장해야 합니다.
 
+#### 가장 쉬운 방법: Cloud Shell에서 스크립트 한 번 실행
+1. [Google Cloud 콘솔](https://console.cloud.google.com)에서 프로젝트를 만들고 결제 계정을 연결합니다 (Cloud Run 사용에 필요).
+2. [neon.tech](https://neon.tech)에서 무료 PostgreSQL을 만들고 연결 주소(`postgresql://...`)를 복사합니다.
+3. [Cloud Shell](https://shell.cloud.google.com)을 열고 아래를 붙여넣습니다. 중간에 Gemini API 키, 관리자 비밀번호, DB 주소를 물어봅니다(입력값은 화면에 안 보이고 Secret Manager에만 저장).
+```bash
+git clone -b claude/ai-handwriting-solution-generator-5kyxsz https://github.com/cth7045-cloud/handwritten-solution-app
+cd handwritten-solution-app
+bash deploy/cloudrun.sh
+```
+끝나면 접속 주소가 출력됩니다. 코드를 업데이트한 뒤에는 `git pull && bash deploy/cloudrun.sh`만 다시 실행하면 됩니다(저장된 비밀값은 그대로 사용).
+항상 켜두려면 `MIN_INSTANCES=1 bash deploy/cloudrun.sh` (첫 접속 지연 없음, 대신 상시 과금).
+
+#### 직접 명령어로 배포하기
+
 **1) 데이터베이스 만들기 (Neon, 무료 플랜 가능)**
 [neon.tech](https://neon.tech) 가입 → 프로젝트 생성(아시아 리전 선택) → 연결 문자열(`postgresql://...`)을 복사합니다.
 (Supabase, Cloud SQL 등 다른 PostgreSQL도 됩니다. 단 Supabase 무료 플랜은 7일간 사용이 없으면 일시 중지됩니다.)

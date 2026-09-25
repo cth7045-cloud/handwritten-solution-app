@@ -1,0 +1,13 @@
+# gcloud run deploy --source 로 업로드할 때 제외할 파일 (Dockerfile이 쓰는 core/ server/ web/ fonts/ 는 포함)
+.git
+.github
+.venv
+venv
+env
+__pycache__/
+*.pyc
+data/
+tests/
+test_output/
+.streamlit/
+.env
