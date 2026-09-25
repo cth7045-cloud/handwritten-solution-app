@@ -22,6 +22,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from core.gemini_solver import solve_problem_with_gemini
@@ -102,7 +103,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app.include_router(api_auth.router)
 
     @app.get("/healthz")
-    def healthz():
+    def healthz(store: Store = Depends(get_store)):
+        # DB까지 한 번 두드려서, 주기적인 헬스체크가 서버와 DB(Supabase 무료 플랜 일시정지)를 함께 깨워 둡니다
+        try:
+            with store.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except DBAPIError:
+            raise HTTPException(status_code=503, detail="데이터베이스에 연결할 수 없습니다.")
         return {"ok": True}
 
     @app.get("/api/styles")

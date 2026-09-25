@@ -119,3 +119,15 @@ def test_solve_ai_failure_returns_502(user_client, monkeypatch):
 def test_serves_web_app(client):
     res = client.get("/")
     assert res.status_code == 200 and "손글씨 해설 노트" in res.text
+
+
+def test_healthz_checks_database(client, monkeypatch):
+    assert client.get("/healthz").json() == {"ok": True}
+
+    from sqlalchemy.exc import OperationalError
+
+    def broken_connect(*a, **kw):
+        raise OperationalError("SELECT 1", {}, Exception("db down"))
+
+    monkeypatch.setattr(client.app.state.store.engine, "connect", broken_connect)
+    assert client.get("/healthz").status_code == 503
