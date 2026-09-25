@@ -1,0 +1,14 @@
+.git
+.venv
+venv
+env
+__pycache__
+*.pyc
+data
+tests
+assets
+test_output
+.streamlit
+app.py
+download_fonts.py
+create_sample_image.py

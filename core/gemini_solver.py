@@ -5,7 +5,7 @@ google-genai SDK를 사용하며, API 키가 없을 때를 위한 Mock 모드도
 import os
 import json
 import base64
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 try:
     from google import genai
@@ -36,6 +36,55 @@ def format_model_name(raw_name: Optional[str]) -> str:
         if k in cleaned:
             return v
     return cleaned
+
+# 기본 우선순위 모델 목록 (실제 존재하는 최신 초고속 비전 플래그십 순서)
+BASE_MODEL_PRIORITY = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.5-pro",
+    "gemini-1.5-pro",
+]
+
+# 모델 목록 조회는 요청마다 수백 ms가 걸리므로 프로세스당 한 번만 수행하고 캐시합니다.
+_candidate_models_cache: Optional[List[str]] = None
+
+
+def resolve_candidate_models(client) -> List[str]:
+    """
+    시도할 모델 순서를 반환합니다.
+    GEMINI_MODELS 환경변수(쉼표 구분)가 있으면 그대로 사용하고,
+    없으면 API 키에 활성화된 모델 목록을 조회해 gemini-3 계열을 최우선 배치합니다.
+    """
+    global _candidate_models_cache
+    env_models = [m.strip() for m in os.environ.get("GEMINI_MODELS", "").split(",") if m.strip()]
+    if env_models:
+        return env_models
+    if _candidate_models_cache:
+        return _candidate_models_cache
+
+    candidate_models = list(BASE_MODEL_PRIORITY)
+    try:
+        active_from_api = []
+        for m in client.models.list():
+            m_name = m.name.replace("models/", "") if hasattr(m, "name") and m.name else ""
+            if "gemini" in m_name and "image" not in m_name and "embedding" not in m_name and "transcribe" not in m_name:
+                active_from_api.append(m_name)
+
+        if active_from_api:
+            # 3.x 모델이 API 목록에 실제로 존재하면 최우선 배치
+            v3_models = [m for m in active_from_api if "gemini-3" in m]
+            ordered = v3_models + [m for m in BASE_MODEL_PRIORITY if m in active_from_api]
+            for m in active_from_api:
+                if m not in ordered and not m.startswith("gemini-1."):
+                    ordered.append(m)
+            if ordered:
+                candidate_models = ordered
+                _candidate_models_cache = ordered
+    except Exception as e:
+        print(f"[*] 모델 목록 동적 조회 생략: {e}")
+    return candidate_models
+
 
 def solve_problem_with_gemini(
     image_bytes: bytes,
@@ -226,35 +275,7 @@ def solve_problem_with_gemini(
 }
 """
 
-        # 기본 우선순위 모델 목록 (실제 존재하는 최신 초고속 비전 플래그십 순서)
-        base_priority = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-2.5-pro",
-            "gemini-1.5-pro",
-        ]
-        
-        # 키에 활성화된 모델 목록 동적 조회 시도
-        candidate_models = list(base_priority)
-        try:
-            active_from_api = []
-            for m in client.models.list():
-                m_name = m.name.replace("models/", "") if hasattr(m, "name") and m.name else ""
-                if "gemini" in m_name and "image" not in m_name and "embedding" not in m_name and "transcribe" not in m_name:
-                    active_from_api.append(m_name)
-            
-            if active_from_api:
-                # 3.x 모델이 API 목록에 실제로 존재하면 최우선 배치
-                v3_models = [m for m in active_from_api if "gemini-3" in m]
-                ordered = v3_models + [m for m in base_priority if m in active_from_api]
-                for m in active_from_api:
-                    if m not in ordered and not m.startswith("gemini-1."):
-                        ordered.append(m)
-                if ordered:
-                    candidate_models = ordered
-        except Exception as e:
-            print(f"[*] 모델 목록 동적 조회 생략: {e}")
+        candidate_models = resolve_candidate_models(client)
 
         response_text = None
         used_model = None

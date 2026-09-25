@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Tuple, Optional
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from core.handwriting_engine import HandwritingEngine, PEN_STYLES, FONT_MAP
+from core.safe_math import safe_eval
 
 class HandwrittenDiagramEngine:
     def __init__(self, handwriting_engine: HandwritingEngine):
@@ -209,12 +210,12 @@ class HandwrittenDiagramEngine:
             xs_s = np.linspace(s_xmin, s_xmax, 60)
             poly_pts = []
             try:
-                y_lows = eval(y_low_expr, {"__builtins__": {}}, {"x": xs_s, "np": np, "math": math, "abs": np.abs})
+                y_lows = safe_eval(y_low_expr, xs_s)
                 if isinstance(y_lows, (int, float)):
                     y_lows = np.full_like(xs_s, y_lows)
                 for px, py in zip(xs_s, y_lows):
                     poly_pts.append(to_screen(float(px), float(py)))
-                y_ups = eval(y_up_expr, {"__builtins__": {}}, {"x": xs_s, "np": np, "math": math, "abs": np.abs})
+                y_ups = safe_eval(y_up_expr, xs_s)
                 if isinstance(y_ups, (int, float)):
                     y_ups = np.full_like(xs_s, y_ups)
                 for px, py in zip(reversed(xs_s), reversed(y_ups)):
@@ -247,14 +248,9 @@ class HandwrittenDiagramEngine:
             # 곡선 점 샘플링
             xs = np.linspace(f_xmin, f_xmax, 160)
             pts = []
-            safe_dict = {
-                "x": xs, "np": np, "math": math,
-                "sin": np.sin, "cos": np.cos, "tan": np.tan,
-                "sqrt": np.sqrt, "exp": np.exp, "log": np.log, "abs": np.abs, "pi": np.pi
-            }
             try:
                 clean_expr = expr.replace("^", "**")
-                ys = eval(clean_expr, {"__builtins__": {}}, safe_dict)
+                ys = safe_eval(clean_expr, xs)
                 if isinstance(ys, (int, float)):
                     ys = np.full_like(xs, ys)
 
@@ -595,9 +591,8 @@ class HandwrittenDiagramEngine:
             f_color = accent_blue if f_info.get("color") == "blue" else main_color
             xs = np.linspace(-2.2, 2.2, 90)
             pts_top = []
-            safe_dict = {"x": xs, "np": np, "math": math, "abs": np.abs}
             try:
-                ys = eval(expr, {"__builtins__": {}}, safe_dict)
+                ys = safe_eval(expr, xs)
                 if isinstance(ys, (int, float)):
                     ys = np.full_like(xs, ys)
                 for x_val, y_val in zip(xs, ys):
@@ -682,9 +677,8 @@ class HandwrittenDiagramEngine:
             f_color = accent_blue if f_info.get("color") == "blue" else main_color
             xs_b = np.linspace(-2.2, 2.2, 100)
             pts_bot = []
-            safe_dict = {"x": xs_b, "np": np, "math": math, "abs": np.abs}
             try:
-                ys = eval(expr, {"__builtins__": {}}, safe_dict)
+                ys = safe_eval(expr, xs_b)
                 if isinstance(ys, (int, float)):
                     ys = np.full_like(xs_b, ys)
                 for x_val, y_val in zip(xs_b, ys):

@@ -26,24 +26,63 @@
    - 📌 **포스트잇 메모지 모드 (추천)**: 빽빽한 문제집 위에도 본문을 가리지 않고 실제 메모지를 붙인 듯 그림자와 함께 합성 (노랑, 핑크, 민트, 스카이블루)
    - ✍️ **원본 사진 여백 직접 필기 모드**: 문제집의 빈 여백에 자연스럽게 끄적여 푼 느낌
    - 📖 **모눈노트 확장 모드**: 문제집 우측에 격자 연습장을 붙여 넉넉한 풀이 공간 확보
-5. **무료 Gemini API 연동 & 샘플 모드 지원**:
+5. **Gemini API 연동**:
    - Google AI Studio의 무료 API 키로 동작
-   - API 키가 없어도 즉시 체험해볼 수 있는 **샘플 모드(Mock Mode)** 기본 탑재
 
 ---
 
-## 🚀 실행 방법
+## 🏗️ 서비스 구조 (웹 버전)
 
-### 방법 1. 원클릭 실행 (가장 간단)
-폴더 내의 `run.bat` 파일을 더블 클릭하면 자동으로 브라우저가 열리며 앱이 실행됩니다.
-
-### 방법 2. 터미널에서 실행
-```bash
-cd C:\Users\cth70\.gemini\antigravity\scratch\handwritten-solution-app
-.venv\Scripts\streamlit.exe run app.py
+```
+[브라우저 / 스마트폰 / 태블릿]  web/  (HTML + JS, 설치형 PWA)
+   │  사진 촬영·파일·Ctrl+V 붙여넣기 → 브라우저에서 1800px로 축소
+   │
+   ├─ POST /api/solve   이미지 → 풀이 JSON        (Gemini 호출, 수 초)
+   └─ POST /api/render  이미지 + 풀이 JSON + 스타일 → PNG  (AI 없이 ~0.1초)
+                         │
+             [FastAPI 서버]  server/   ← Docker 컨테이너 1개 (Cloud Run 등)
+                         │
+             core/  손글씨·그래프·레이아웃 합성 엔진 (Pillow)
 ```
 
-브라우저 주소창에 `http://localhost:8501`로 접속하시면 됩니다.
+- **AI 풀이와 렌더링을 분리**했기 때문에, 풀이가 한 번 나오면 펜·글씨체·레이아웃을 바꿀 때 AI를 다시 부르지 않고 즉시 다시 그립니다.
+- 같은 `seed`면 같은 필체 흔들림이 재현되고, **[다시 쓰기]** 를 누르면 새로운 흔들림으로 다시 씁니다.
+- AI가 만든 그래프 함수식은 `core/safe_math.py`의 안전한 수식 해석기로만 계산합니다(`eval` 미사용).
+
+## 🚀 실행 방법
+
+### 웹 서비스 (권장)
+```bash
+pip install -r server/requirements.txt
+export GEMINI_API_KEY=발급받은_키          # Windows: set GEMINI_API_KEY=...
+uvicorn server.main:app --reload --port 8000
+```
+브라우저에서 `http://localhost:8000` 접속. API 문서는 `http://localhost:8000/api/docs`.
+
+| 환경변수 | 설명 |
+|---|---|
+| `GEMINI_API_KEY` | (필수) 서버가 사용할 Gemini API 키. 사용자에게는 노출되지 않습니다. |
+| `GEMINI_MODELS` | (선택) 시도할 모델을 쉼표로 고정. 예: `gemini-2.5-flash`. 비우면 키에 열린 모델을 한 번 조회해 최신 순으로 사용합니다. |
+| `WEB_CONCURRENCY` | (선택) Docker 실행 시 워커 수, 기본 2 |
+
+### 24시간 배포 (Google Cloud Run 예시)
+```bash
+gcloud run deploy handwritten-note --source . --region asia-northeast3 \
+  --allow-unauthenticated --min-instances 1 --memory 1Gi \
+  --set-env-vars GEMINI_MODELS=gemini-2.5-flash --set-secrets GEMINI_API_KEY=gemini-key:latest
+```
+`--min-instances 1` 로 항상 1대를 켜 두면 첫 요청 지연(콜드 스타트)이 없습니다. 같은 `Dockerfile`로 Fly.io, Render, Railway에도 그대로 배포할 수 있습니다.
+
+### 테스트
+```bash
+pip install pytest httpx
+python -m pytest
+```
+
+### (구버전) Streamlit 앱
+```bash
+streamlit run app.py
+```
 
 ---
 
@@ -59,21 +98,20 @@ cd C:\Users\cth70\.gemini\antigravity\scratch\handwritten-solution-app
 
 ```
 handwritten-solution-app/
-│
-├── .venv/                      # 파이썬 가상환경
-├── fonts/                      # 오픈소스 한글 손글씨 폰트 모음 (.ttf)
-├── assets/                     # 기본 샘플 문제집 이미지
-├── test_output/                # 폰트 및 모드별 렌더링 검증 결과 이미지
-│
+├── server/                 # 웹 API 서버 (FastAPI)
+│   ├── main.py             # /api/solve, /api/render, /api/styles, 정적 파일 제공
+│   ├── rendering.py        # 업로드 이미지 전처리 + 합성 렌더링
+│   ├── catalog.py          # 폰트/펜/레이아웃 id ↔ 엔진 키 매핑
+│   └── requirements.txt
+├── web/                    # 프론트엔드 (index.html, app.js, styles.css, PWA manifest)
 ├── core/
-│   ├── gemini_solver.py        # Gemini API 문제 인식 및 단계별 풀이 도출
-│   ├── handwriting_engine.py   # 손글씨 렌더링, 필압/회전/질감, 글리프 검사
-│   └── overlay_composer.py     # 포스트잇, 여백, 노트 확장 합성 엔진
-│
-├── app.py                      # Streamlit 인터랙티브 웹 UI
-├── create_sample_image.py      # 모의 문제집 이미지 생성기
-├── download_fonts.py           # 폰트 자동 다운로드 스크립트
-├── test_synthesis.py           # 합성 품질 자동 검증 스크립트
-├── requirements.txt            # 라이브러리 의존성
-└── run.bat                     # 간편 실행 파일
+│   ├── gemini_solver.py    # Gemini 문제 인식 및 풀이 JSON 생성
+│   ├── handwriting_engine.py  # 손글씨 렌더링 (흔들림·회전·필압), LaTeX → 손글씨 수식 변환
+│   ├── diagram_engine.py   # 손그림 그래프 (좌표평면, 도함수-원함수 2단 연계 등)
+│   ├── overlay_composer.py # 여백 / 포스트잇 / 모눈노트 합성
+│   └── safe_math.py        # AI 함수식 안전 계산기
+├── fonts/                  # 오픈소스 한글 손글씨 폰트 (.ttf)
+├── tests/                  # pytest
+├── Dockerfile              # 웹 서비스 컨테이너
+└── app.py                  # (구버전) Streamlit UI
 ```
