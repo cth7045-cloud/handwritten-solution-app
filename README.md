@@ -85,7 +85,7 @@ uvicorn server.main:app --reload --port 8000
 - 주소: https://handwritten-note.onrender.com
 - 서버: Render 무료 플랜, 싱가포르 (`WEB_CONCURRENCY=1`, 무료 플랜 메모리 512MB에 맞춤). 15분간 접속이 없으면 잠들고, 다음 접속 때 깨어나는 데 약 1분 걸립니다.
 - DB: Supabase(싱가포르) PostgreSQL. 앱 전용 계정 `hwapp`이 공개 API에 노출되지 않는 `app` 스키마만 사용합니다. 세션 풀러(IPv4) 주소로 접속합니다.
-- **`claude/ai-handwriting-solution-generator-5kyxsz` 브랜치에 push하면 자동으로 다시 배포됩니다.**
+- 배포 브랜치: `claude/ai-handwriting-solution-generator-5kyxsz`. 코드를 올린 뒤 Render 대시보드의 **Manual Deploy → Deploy latest commit**으로 다시 배포합니다. (Render 계정 설정에서 GitHub를 연결하면 push할 때마다 자동으로 배포됩니다.)
 - 환경변수(`GEMINI_API_KEY`, `ADMIN_PASSWORD`, `DATABASE_URL` 등)는 Render 대시보드 → 서비스 → Environment에서 관리합니다.
 
 ### 24시간 배포 (Google Cloud Run + Neon PostgreSQL)
