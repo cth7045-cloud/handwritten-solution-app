@@ -142,7 +142,8 @@ kbd {
 }
 .choice b { display: block; font-size: 14px; }
 .choice span { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-.choice[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.choice[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.choice[aria-checked="true"] b::before { content: "✓ "; color: var(--accent); }
 .choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -152,7 +153,8 @@ kbd {
   border: 1.5px solid var(--border); background: var(--surface); color: var(--text);
   font: inherit; font-size: 13px; cursor: pointer;
 }
-.chip[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.chip[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); font-weight: 700; box-shadow: inset 0 0 0 1px var(--accent); }
+.chip[aria-checked="true"]::after { content: "✓"; color: var(--accent); font-weight: 800; }
 .swatch { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); flex: none; }
 
 .font-grid {
@@ -165,8 +167,11 @@ kbd {
   border: 1.5px solid var(--border); border-radius: 10px;
   background: #fffefa; cursor: pointer; text-align: left; font: inherit;
 }
-.font-card[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.font-card .font-label { font-size: 12px; color: #5f6673; }
+.font-card[aria-checked="true"] { border-color: var(--accent); outline: 3px solid var(--accent); outline-offset: -1px; background: #eef3ff; }
+.font-card .font-label { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; color: #5f6673; }
+.font-card[aria-checked="true"] .font-label { color: #1d3a8a; font-weight: 700; }
+.font-card .check-badge { display: none; flex: none; font-size: 11.5px; font-weight: 700; color: #fff; background: #1d3a8a; border-radius: 999px; padding: 1px 8px; }
+.font-card[aria-checked="true"] .check-badge { display: inline-block; }
 .font-card img { width: 100%; height: auto; aspect-ratio: 360 / 84; display: block; }
 
 .status { min-height: 1.5em; margin: 10px 0 0; font-size: 13.5px; color: var(--muted); text-align: center; }
@@ -299,3 +304,11 @@ kbd {
 .dialog-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .dialog-head h2 { font-size: 17px; margin: 0; }
 .dialog .btn.big { margin-top: 14px; }
+
+/* 선택 요약, 결과 위 진행 표시 */
+.style-summary { margin: -4px 0 10px; font-size: 13px; font-weight: 600; color: var(--accent); overflow-wrap: anywhere; }
+.result-busy {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 2;
+  padding: 6px 14px; border-radius: 999px; background: var(--accent); color: var(--accent-ink);
+  font-size: 13.5px; font-weight: 700; box-shadow: 0 2px 10px rgba(0,0,0,.2); white-space: nowrap;
+}

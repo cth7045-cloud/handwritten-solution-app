@@ -7,7 +7,7 @@ import random
 from typing import Dict, Any, Tuple, Optional, List
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
-from .handwriting_engine import HandwritingEngine, PEN_STYLES
+from .handwriting_engine import HandwritingEngine, PEN_STYLES, clean_latex_to_handwriting, format_answer
 from .diagram_engine import HandwrittenDiagramEngine
 
 POSTIT_COLORS = {
@@ -85,37 +85,34 @@ class OverlayComposer:
         """최종 정답 텍스트가 위치한 영역을 찾아 자연스러운 손글씨 타원 동그라미를 둘러줍니다."""
         if not ans or not str(ans).strip():
             return img
-        ans_clean = str(ans).strip()
+        # 줄(lines)은 이미 손글씨용으로 변환돼 있으므로 정답도 같은 방식으로 변환한 뒤 찾습니다
+        ans_clean = self.engine.sanitize_math_text(clean_latex_to_handwriting(format_answer(ans)), font_name)
+        if not ans_clean:
+            return img
         target_idx = -1
         for idx, l in enumerate(lines):
-            if f"정답: {ans_clean}" in l or (f"정답" in l and ans_clean in l):
+            if "정답" in l and ans_clean in l:
                 target_idx = idx
                 break
         if target_idx == -1:
             return img
 
         line_y = start_pos[1] + target_idx * (font_size + line_spacing)
-        font = self.engine.load_font(font_name, font_size)
-
-        target_line = lines[target_idx]
-        parts = target_line.split(ans_clean, 1)
-        prefix = parts[0]
-        san_prefix = self.engine.sanitize_math_text(prefix, font_name)
-        san_ans = self.engine.sanitize_math_text(ans_clean, font_name)
-
-        p_box = font.getbbox(san_prefix)
-        prefix_w = (p_box[2] - p_box[0]) if p_box else 0
-        a_box = font.getbbox(san_ans)
-        ans_w = max(24, (a_box[2] - a_box[0])) if a_box else 32
+        baseline = line_y + self.engine.cap_height(font_name, font_size)
+        prefix = lines[target_idx].split(ans_clean, 1)[0]
+        prefix_w = self.engine.measure(prefix, font_name, font_size)
+        ans_w = self.engine.measure(ans_clean, font_name, font_size)
 
         x1 = start_pos[0] + prefix_w
-        y1 = line_y
+        y1 = baseline - self.engine.cap_height(font_name, font_size)
         x2 = x1 + ans_w
-        y2 = y1 + font_size
+        y2 = baseline + font_size * 0.15
 
         style = PEN_STYLES.get(pen_style, list(PEN_STYLES.values())[0])
         pen_color = style["color"]
-        return self.engine.draw_answer_circle(img, bbox=(x1, y1, x2, y2), color=pen_color, width=2)
+        # 정답 바로 앞 공백 폭만큼만 왼쪽으로 나갈 수 있음 (그 이상이면 "정답:" 글자를 덮음)
+        left_room = max(1.0, self.engine.measure(" ", font_name, font_size) - 2) if prefix.endswith(" ") else 1.0
+        return self.engine.draw_answer_circle(img, bbox=(x1, y1, x2, y2), color=pen_color, width=2, left_room=left_room)
 
     def compose_margin_mode(
         self,
@@ -172,7 +169,7 @@ class OverlayComposer:
         for step in solution_data.get("steps", []):
             lines_to_draw.extend(self.engine.wrap_text(step, font_name, font_size, max_wrap_w))
 
-        ans = solution_data.get("final_answer", "")
+        ans = format_answer(solution_data.get("final_answer", ""))
         if ans:
             lines_to_draw.append("")
             lines_to_draw.extend(self.engine.wrap_text(f"∴ 정답: {ans}", font_name, font_size, max_wrap_w))
@@ -361,7 +358,7 @@ class OverlayComposer:
         for step in solution_data.get("steps", []):
             lines_to_draw.extend(self.engine.wrap_text(step, font_name, font_size, wrap_w))
 
-        ans = solution_data.get("final_answer", "")
+        ans = format_answer(solution_data.get("final_answer", ""))
         if ans:
             lines_to_draw.append("")
             lines_to_draw.extend(self.engine.wrap_text(f"정답: {ans}", font_name, font_size, wrap_w))
@@ -535,8 +532,8 @@ class OverlayComposer:
         wrap_w = ext_w - 75
 
         lines_to_draw: List[str] = [
-            "📝 [선생님 손글씨 풀이 노트]",
-            "────────────────────────",
+            "[풀이 노트]",
+            "",
         ]
         title = solution_data.get("problem_title", "")
         if title:
@@ -546,7 +543,7 @@ class OverlayComposer:
         for step in solution_data.get("steps", []):
             lines_to_draw.extend(self.engine.wrap_text(step, font_name, font_size, wrap_w))
 
-        ans = solution_data.get("final_answer", "")
+        ans = format_answer(solution_data.get("final_answer", ""))
         if ans:
             lines_to_draw.append("")
             lines_to_draw.extend(self.engine.wrap_text(f"★ 정답: {ans}", font_name, font_size, wrap_w))
@@ -599,8 +596,8 @@ class OverlayComposer:
 
         if diag_img is not None:
             head_lines = [
-                "📝 [선생님 손글씨 풀이 노트]",
-                "────────────────────────",
+                "[풀이 노트]",
+                "",
             ]
             if title:
                 head_lines.extend(self.engine.wrap_text(f"문제: {title}", font_name, font_size, wrap_w))

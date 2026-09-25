@@ -18,6 +18,9 @@ const state = {
   resultUrl: null,
 };
 
+// id -> 화면에 보여줄 이름 (선택 확인 메시지용)
+const labels = { mode: {}, font: {}, pen: {}, layout: {}, postit: {} };
+
 const $ = (id) => document.getElementById(id);
 const els = {
   dropzone: $("dropzone"),
@@ -34,6 +37,8 @@ const els = {
   generateBtn: $("generate-btn"),
   status: $("status"),
   resultBox: $("result-box"),
+  resultBusy: $("result-busy"),
+  styleSummary: $("style-summary"),
   resultEmpty: $("result-empty"),
   resultImg: $("result-img"),
   rewriteBtn: $("rewrite-btn"),
@@ -103,6 +108,10 @@ function fontCard(item) {
   const label = document.createElement("span");
   label.className = "font-label";
   label.textContent = item.label;
+  const badge = document.createElement("span");
+  badge.className = "check-badge";
+  badge.textContent = "✓ 선택됨";
+  label.append(badge);
   const img = document.createElement("img");
   img.loading = "lazy";
   img.alt = `${item.label} 필기 예시`;
@@ -115,30 +124,54 @@ function refreshFontPreviews() {
   for (const card of els.fontOptions.children) card.querySelector("img").src = fontPreviewUrl(card.dataset.id);
 }
 
+function updateStyleSummary() {
+  els.styleSummary.textContent = `선택: ${labels.font[state.font] || ""} · ${labels.pen[state.pen] || ""}`;
+}
+
+// 스타일을 바꾸면 무엇이 선택됐는지 바로 알려주고, 풀이가 있으면 그 스타일로 다시 씁니다.
+function onStyleChange(kind, id) {
+  updateStyleSummary();
+  const name = labels[kind][id] || id;
+  const what = { font: "글씨체", pen: "펜", layout: "합성 방식", postit: "포스트잇 색" }[kind];
+  if (state.solution) {
+    scheduleRender(`✓ ${what} 변경: ${name} — 새 스타일로 다시 썼습니다.`);
+  } else {
+    setStatus(`✓ ${what} 선택: ${name} — 해설을 만들면 이 스타일로 씁니다.`);
+  }
+}
+
 async function loadStyles() {
   const s = await request("/api/styles");
+  for (const [kind, list] of [["mode", s.solve_modes], ["font", s.fonts], ["pen", s.pens], ["layout", s.layouts], ["postit", s.postit_colors]]) {
+    for (const item of list) labels[kind][item.id] = item.label;
+  }
   renderRadioGroup(els.modeOptions, s.solve_modes, state.mode, choiceButton, (id) => {
     state.mode = id;
-    if (state.solution) setStatus("풀이 방식이 바뀌었습니다. 새로 풀려면 버튼을 눌러주세요.");
+    setStatus(
+      state.solution
+        ? `✓ 풀이 방식 선택: ${labels.mode[id]} — 새로 풀려면 [손글씨 해설 만들기]를 눌러주세요.`
+        : `✓ 풀이 방식 선택: ${labels.mode[id]}`,
+    );
   });
   renderRadioGroup(els.penOptions, s.pens, state.pen, chipButton, (id) => {
     state.pen = id;
     refreshFontPreviews();
-    scheduleRender();
+    onStyleChange("pen", id);
   });
   renderRadioGroup(els.fontOptions, s.fonts, state.font, fontCard, (id) => {
     state.font = id;
-    scheduleRender();
+    onStyleChange("font", id);
   });
   renderRadioGroup(els.layoutOptions, s.layouts, state.layout, choiceButton, (id) => {
     state.layout = id;
     els.postitOptions.hidden = id !== "postit";
-    scheduleRender();
+    onStyleChange("layout", id);
   });
   renderRadioGroup(els.postitOptions, s.postit_colors, state.postit, chipButton, (id) => {
     state.postit = id;
-    scheduleRender();
+    onStyleChange("postit", id);
   });
+  updateStyleSummary();
 }
 
 // ---------- 이미지 등록 ----------
@@ -249,13 +282,25 @@ function bindImageInputs() {
 let renderController = null;
 let renderTimer = null;
 
-function scheduleRender() {
+function scheduleRender(doneMsg) {
   if (!state.solution) return;
   clearTimeout(renderTimer);
-  renderTimer = setTimeout(renderResult, 120);
+  showBusy("✎ 다시 쓰는 중…");
+  renderTimer = setTimeout(() => renderResult(doneMsg), 120);
 }
 
-async function renderResult() {
+function showBusy(text) {
+  els.resultBox.classList.add("busy");
+  els.resultBusy.textContent = text;
+  els.resultBusy.hidden = false;
+}
+
+function hideBusy() {
+  els.resultBox.classList.remove("busy");
+  els.resultBusy.hidden = true;
+}
+
+async function renderResult(doneMsg) {
   if (!state.solution) return;
   renderController?.abort();
   renderController = new AbortController();
@@ -272,7 +317,8 @@ async function renderResult() {
   form.append("postit_color", state.postit);
   form.append("seed", String(state.seed));
 
-  els.resultBox.classList.add("busy");
+  showBusy("✎ 다시 쓰는 중…");
+  let aborted = false;
   try {
     const res = await request("/api/render", { method: "POST", form, signal: renderController.signal, raw: true });
     const blob = await res.blob();
@@ -285,10 +331,13 @@ async function renderResult() {
     els.downloadBtn.classList.remove("disabled");
     els.downloadBtn.setAttribute("aria-disabled", "false");
     els.rewriteBtn.disabled = false;
+    if (doneMsg) setStatus(doneMsg);
   } catch (err) {
-    if (err.name !== "AbortError") setStatus(err.message, true);
+    aborted = err.name === "AbortError";
+    if (!aborted) setStatus(err.message, true);
   } finally {
-    els.resultBox.classList.remove("busy");
+    // 더 새로운 요청이 진행 중이면 표시를 유지합니다
+    if (!aborted) hideBusy();
   }
 }
 
@@ -328,7 +377,7 @@ function scrollToResultOnPhone() {
 async function generate() {
   if (!state.image) return;
   els.generateBtn.disabled = true;
-  els.resultBox.classList.add("busy");
+  showBusy("✎ AI가 문제를 푸는 중…");
   const started = performance.now();
   const tick = setInterval(() => {
     setStatus(`AI가 문제를 푸는 중… ${((performance.now() - started) / 1000).toFixed(0)}초`);
@@ -355,7 +404,7 @@ async function generate() {
   } finally {
     clearInterval(tick);
     els.generateBtn.disabled = false;
-    els.resultBox.classList.remove("busy");
+    hideBusy();
   }
 }
 
@@ -379,6 +428,7 @@ export async function openSolve(solveId) {
   selectRadio(els.postitOptions, state.postit);
   els.postitOptions.hidden = state.layout !== "postit";
   refreshFontPreviews();
+  updateStyleSummary();
   setSourcePreview(`/api/history/${rec.id}/image`);
   els.generateBtn.disabled = true; // 새로 풀려면 이미지를 다시 올리도록
   showSolutionText(rec.solution, rec.elapsed_ms);
@@ -392,7 +442,7 @@ export async function initStudio({ onUsageChange }) {
   els.generateBtn.addEventListener("click", generate);
   els.rewriteBtn.addEventListener("click", () => {
     state.seed = newSeed();
-    renderResult();
+    renderResult("✓ 같은 풀이를 새 필체로 다시 썼습니다.");
   });
   try {
     await loadStyles();

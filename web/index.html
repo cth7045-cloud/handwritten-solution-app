@@ -90,6 +90,7 @@
         <div id="mode-options" class="choice-grid two" role="radiogroup" aria-label="풀이 방식"></div>
 
         <h2 class="section-title"><span class="step">3</span>펜과 글씨체</h2>
+        <p id="style-summary" class="style-summary" aria-live="polite"></p>
         <div id="pen-options" class="chip-row" role="radiogroup" aria-label="펜 종류"></div>
         <div id="font-options" class="font-grid" role="radiogroup" aria-label="손글씨 폰트"></div>
 
@@ -110,6 +111,7 @@
           </div>
         </div>
         <div id="result-box" class="result-box">
+          <div id="result-busy" class="result-busy" role="status" hidden></div>
           <div id="result-empty" class="result-empty">
             문제 이미지를 올리고 <b>손글씨 해설 만들기</b>를 누르면 여기에 결과가 나옵니다.<br />
             풀이가 나온 뒤에는 펜·글씨체·합성 방식을 바꾸면 AI를 다시 부르지 않고 바로 다시 그립니다.

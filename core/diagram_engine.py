@@ -8,7 +8,7 @@ import random
 from typing import Dict, Any, List, Tuple, Optional
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
-from core.handwriting_engine import HandwritingEngine, PEN_STYLES, FONT_MAP
+from core.handwriting_engine import HandwritingEngine, PEN_STYLES, FONT_MAP, clean_latex_to_handwriting
 from core.safe_math import safe_eval
 
 class HandwrittenDiagramEngine:
@@ -22,8 +22,29 @@ class HandwrittenDiagramEngine:
         return color, stroke_w
 
     def _draw_text(self, draw: ImageDraw.ImageDraw, pos: Tuple[float, float], text: str, fill, font, font_name: str):
-        safe_text = self.hw_engine.sanitize_math_text(str(text), font_name)
-        draw.text(pos, safe_text, fill=fill, font=font)
+        """pos는 글자 윗선 기준 좌표. θ, √ 처럼 손글씨 폰트에 없는 기호는 보조 폰트로 그립니다."""
+        safe_text = self.hw_engine.sanitize_math_text(clean_latex_to_handwriting(str(text)), font_name)
+        size = int(font.size)
+        baseline = pos[1] + self.hw_engine.cap_height(font_name, size)
+        self.hw_engine.draw_runs(draw, (pos[0], baseline), safe_text, font_name, size, fill)
+
+    def _label_box(self, pos: Tuple[float, float], text: str, font, font_name: str) -> Tuple[float, float, float, float]:
+        w = self.hw_engine.measure(clean_latex_to_handwriting(str(text)), font_name, int(font.size))
+        return (pos[0], pos[1], pos[0] + w, pos[1] + font.size)
+
+    def _place_label(self, placed: List[Tuple[float, float, float, float]], pos: Tuple[float, float],
+                     text: str, font, font_name: str) -> Tuple[float, float]:
+        """이미 놓인 라벨과 겹치지 않는 위치를 찾습니다 (아래, 위, 왼쪽 순서로 비켜 봄)."""
+        w = self._label_box(pos, text, font, font_name)[2] - pos[0]
+        h = font.size + 2
+        for dx, dy in [(0, 0), (0, h), (0, -h), (-w - 10, 0), (0, 2 * h), (-w - 10, h)]:
+            cand = (pos[0] + dx, pos[1] + dy)
+            box = self._label_box(cand, text, font, font_name)
+            if not any(box[0] < b[2] and b[0] < box[2] and box[1] < b[3] and b[1] < box[3] for b in placed):
+                placed.append(box)
+                return cand
+        placed.append(self._label_box(pos, text, font, font_name))
+        return pos
 
     def _draw_wobbly_line(
         self,
@@ -237,6 +258,9 @@ class HandwrittenDiagramEngine:
             dashed = line.get("style", "dashed") == "dashed"
             self._draw_wobbly_line(draw, p1, p2, (120, 130, 145, 190), width=max(1, stroke_w - 1), dashed=dashed)
 
+        # 라벨끼리 겹치지 않도록 이미 놓인 라벨 영역을 기억합니다
+        placed_labels: List[Tuple[float, float, float, float]] = []
+
         # 4. 함수 곡선들(Functions)
         funcs = diagram_data.get("functions", [])
         for f_idx, f_info in enumerate(funcs):
@@ -275,7 +299,8 @@ class HandwrittenDiagramEngine:
             f_label = f_info.get("label", "")
             if f_label and pts:
                 lbl_pt = pts[-1] if len(pts) < 140 else pts[int(len(pts) * 0.85)]
-                self._draw_text(draw, (lbl_pt[0] + 6, lbl_pt[1] - 16), f_label, f_color, font, font_name)
+                lbl_pos = self._place_label(placed_labels, (lbl_pt[0] + 6, lbl_pt[1] - 16), f_label, font, font_name)
+                self._draw_text(draw, lbl_pos, f_label, f_color, font, font_name)
 
         # 5. 주요 특징점(Points) & 점 좌표 레이블
         for pt in diagram_data.get("points", []):
@@ -295,7 +320,8 @@ class HandwrittenDiagramEngine:
                 elif abs(px) < 0.1:
                     pos_dx = -18
                     pos_dy = -8
-                self._draw_text(draw, (sx + pos_dx, sy + pos_dy), p_label, main_color, font, font_name)
+                lbl_pos = self._place_label(placed_labels, (sx + pos_dx, sy + pos_dy), p_label, font, font_name)
+                self._draw_text(draw, lbl_pos, p_label, main_color, font, font_name)
 
         # 6. 그래프 타이틀 (상단 여백에 깔끔하게 배치)
         diag_title = diagram_data.get("title", "")
