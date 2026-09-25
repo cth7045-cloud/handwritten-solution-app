@@ -128,6 +128,20 @@ MATH_FALLBACK_MAP = {
 
 import re
 
+SYMBOL_FONT_FILE = "DejaVuSans.ttf"
+SYMBOL_FONT_SCALE = 0.72
+
+_LATEX_SYMBOLS = {
+    "theta": "θ", "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "Delta": "Δ",
+    "lambda": "λ", "mu": "μ", "sigma": "σ", "omega": "ω", "phi": "φ", "pi": "π",
+    "infty": "∞", "int": "∫", "sum": "Σ", "angle": "∠", "circ": "°", "therefore": "∴",
+    "because": "∵", "perp": "⊥", "parallel": "∥", "triangle": "△",
+}
+_GREEK_WORDS = {"theta": "θ", "alpha": "α", "beta": "β", "pi": "π"}
+_SUPERSCRIPT = str.maketrans("0123456789-n", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻ⁿ")
+_SUBSCRIPT = str.maketrans("0123456789n", "₀₁₂₃₄₅₆₇₈₉ₙ")
+
+
 def clean_latex_to_handwriting(text: str) -> str:
     """
     AI가 생성한 LaTeX 원시 수식이나 마크다운 기호를
@@ -162,18 +176,22 @@ def clean_latex_to_handwriting(text: str) -> str:
     s = re.sub(r'\\notin\b', ' not in ', s)
     s = re.sub(r'\\subset\b', ' subset ', s)
     
-    # 4. 부등호 및 화살표
-    s = re.sub(r'\\le(q)?\b', '<=', s)
-    s = re.sub(r'\\ge(q)?\b', '>=', s)
-    s = re.sub(r'\\ne(q)?\b', '!=', s)
+    # 4. 부등호 및 화살표 (사람이 손으로 쓰는 기호 그대로)
+    s = re.sub(r'\\le(q)?\b', '≤', s)
+    s = re.sub(r'\\ge(q)?\b', '≥', s)
+    s = re.sub(r'\\ne(q)?\b', '≠', s)
     s = re.sub(r'\\approx\b', '≒', s)
     s = re.sub(r'\\equiv\b', '≡', s)
-    s = re.sub(r'\\Rightarrow\b', '=>', s)
-    s = re.sub(r'\\Leftarrow\b', '<=', s)
-    s = re.sub(r'\\Leftrightarrow\b', '<=>', s)
-    s = re.sub(r'\\rightarrow\b', '->', s)
-    s = re.sub(r'\\leftarrow\b', '<-', s)
-    s = re.sub(r'\\to\b', '->', s)
+    s = re.sub(r'\\Rightarrow\b', '⇒', s)
+    s = re.sub(r'\\Leftarrow\b', '⇐', s)
+    s = re.sub(r'\\Leftrightarrow\b', '⇔', s)
+    s = re.sub(r'\\rightarrow\b', '→', s)
+    s = re.sub(r'\\leftarrow\b', '←', s)
+    s = re.sub(r'\\to\b', '→', s)
+
+    # 4-1. 그리스 문자 및 기타 기호
+    for cmd, sym in _LATEX_SYMBOLS.items():
+        s = re.sub(r'\\' + cmd + r'(?![a-zA-Z])', sym, s)
     
     # 5. 첨자: a_{n+1} -> a_(n+1)
     s = re.sub(r'_\{([^{}]+)\}', r'_(\1)', s)
@@ -194,11 +212,41 @@ def clean_latex_to_handwriting(text: str) -> str:
     s = re.sub(r'\\text\{([^{}]+)\}', r'\1', s)
     s = re.sub(r'\\mathrm\{([^{}]+)\}', r'\1', s)
     s = re.sub(r'\\mathbf\{([^{}]+)\}', r'\1', s)
+    s = re.sub(r'\\(?:overline|bar|vec|hat)\{([^{}]+)\}', r'\1', s)
     s = s.replace(r'\{', '{').replace(r'\}', '}')
     s = re.sub(r'\\([a-zA-Z]+)', r'\1', s)
     s = s.replace('$', '')
+
+    # 8. AI가 기호 대신 영어로 풀어 쓴 그리스 문자 (costheta, sin theta, theta^2 등)
+    s = re.sub(r'(sin|cos|tan)\s*(theta|alpha|beta|pi)(?![a-zA-Z])',
+               lambda m: f"{m.group(1)} {_GREEK_WORDS[m.group(2)]}", s)
+    for word, sym in _GREEK_WORDS.items():
+        s = re.sub(r'(?<![a-zA-Z])' + word + r'(?![a-zA-Z])', sym, s)
+
+    # 9. ASCII 화살표/부등호 -> 손글씨 기호 (<=> 를 먼저 처리)
+    s = s.replace('<=>', '⇔').replace('=>', '⇒').replace('->', '→')
+    s = s.replace('<=', '≤').replace('>=', '≥').replace('!=', '≠')
+
+    # 10. 간단한 거듭제곱은 위첨자로: x^2 -> x², θ^(4) -> θ⁴, x^-1 -> x⁻¹
+    s = s.replace('^°', '°')
+    s = re.sub(r'\^(?:\((-?\d{1,2}|n)\)|(-?\d{1,2}|n)(?![0-9A-Za-z]))',
+               lambda m: (m.group(1) or m.group(2)).translate(_SUPERSCRIPT), s)
+
+    # 11. 간단한 아래첨자와 극한 표기: a_1 -> a₁, ∫_0 -> ∫₀, lim_(θ→0+) -> lim(θ→0+)
+    s = re.sub(r'_(?:\((\d{1,2}|n)\)|(\d{1,2}|n)(?![0-9A-Za-z]))',
+               lambda m: (m.group(1) or m.group(2)).translate(_SUBSCRIPT), s)
+    s = re.sub(r'lim_\(', 'lim(', s)
+
     s = re.sub(r'  +', ' ', s)
     return s.strip()
+
+
+def format_answer(ans) -> str:
+    """최종 정답을 손글씨용으로 변환합니다. \\frac{1}{8} -> (1/8) -> 1/8 처럼 불필요한 바깥 괄호는 뺍니다."""
+    s = clean_latex_to_handwriting(str(ans or "")).strip()
+    # 숫자/분수 하나만 감싼 괄호만 뺍니다 (좌표 (2, 3) 등은 그대로)
+    m = re.fullmatch(r'\((-?[0-9A-Za-z.√π]+\s*/\s*[0-9A-Za-z.√π]+|-?[0-9.]+)\)', s)
+    return m.group(1).strip() if m else s
 
 
 class HandwritingEngine:
@@ -208,6 +256,67 @@ class HandwritingEngine:
         self._font_cache = {}
         self._cmap_cache = {}
         self.system_fallback_path = "C:/Windows/Fonts/malgun.ttf" if os.path.exists("C:/Windows/Fonts/malgun.ttf") else None
+        # 손글씨 폰트에 없는 수학 기호(θ, π, √, ², ⇒, ≤ ...)만 골라 그릴 보조 폰트
+        self.symbol_font_path = os.path.join(self.fonts_dir, "fallback", SYMBOL_FONT_FILE)
+        self._symbol_cmap: Optional[set] = None
+
+    # ---------- 보조 기호 폰트 ----------
+    def symbol_cmap(self) -> set:
+        if self._symbol_cmap is None:
+            try:
+                tt = TTFont(self.symbol_font_path, lazy=True)
+                self._symbol_cmap = set(tt.getBestCmap() or {})
+                tt.close()
+            except Exception:
+                self._symbol_cmap = set()
+        return self._symbol_cmap
+
+    def load_symbol_font(self, size: int) -> Optional[ImageFont.FreeTypeFont]:
+        # 보조 폰트는 글자가 커 보여서 손글씨 크기에 맞게 줄여 씁니다
+        key = ("__symbol__", size)
+        if key not in self._font_cache:
+            try:
+                self._font_cache[key] = ImageFont.truetype(self.symbol_font_path, max(8, round(size * SYMBOL_FONT_SCALE)))
+            except Exception:
+                self._font_cache[key] = None
+        return self._font_cache[key]
+
+    def _uses_symbol_font(self, font_name: str, ch: str) -> bool:
+        return (
+            not ch.isspace()
+            and not self.font_supports_char(font_name, ch)
+            and ord(ch) in self.symbol_cmap()
+        )
+
+    def text_runs(self, text: str, font_name: str, font_size: int) -> List[Tuple[str, ImageFont.FreeTypeFont]]:
+        """텍스트를 '손글씨 폰트로 쓸 부분'과 '보조 기호 폰트로 쓸 부분'으로 나눕니다."""
+        main = self.load_font(font_name, font_size)
+        symbol = self.load_symbol_font(font_size)
+        runs: List[Tuple[str, ImageFont.FreeTypeFont]] = []
+        for ch in text:
+            f = symbol if symbol is not None and self._uses_symbol_font(font_name, ch) else main
+            if runs and runs[-1][1] is f:
+                runs[-1] = (runs[-1][0] + ch, f)
+            else:
+                runs.append((ch, f))
+        return runs
+
+    def measure(self, text: str, font_name: str, font_size: int) -> float:
+        """여러 폰트가 섞인 텍스트의 가로 길이."""
+        return sum(f.getlength(t) for t, f in self.text_runs(text, font_name, font_size))
+
+    def cap_height(self, font_name: str, font_size: int) -> int:
+        """한글/대문자 윗선에서 기준선(baseline)까지의 높이."""
+        return -self.load_font(font_name, font_size).getbbox("가H", anchor="ls")[1]
+
+    def draw_runs(self, draw: ImageDraw.ImageDraw, baseline_xy: Tuple[float, float], text: str,
+                  font_name: str, font_size: int, fill) -> float:
+        """기준선에 맞춰 여러 폰트가 섞인 텍스트를 그리고, 그린 가로 길이를 반환합니다."""
+        x, y = baseline_xy
+        for t, f in self.text_runs(text, font_name, font_size):
+            draw.text((x, y), t, font=f, fill=fill, anchor="ls")
+            x += f.getlength(t)
+        return x - baseline_xy[0]
 
     def get_font_path(self, font_name: str) -> Optional[str]:
         filename = FONT_MAP.get(font_name, font_name)
@@ -309,68 +418,52 @@ class HandwritingEngine:
 
     def sanitize_math_text(self, text: str, font_name: str) -> str:
         """
-        선택된 손글씨 폰트에서 미지원(누락)되는 특수 수학 기호를
-        자연스러운 대체 문자로 변환하여 글자 깨짐(□)을 원천 방지합니다.
+        손글씨 폰트와 보조 기호 폰트 모두에 없는 글자만 자연스러운 대체 문자로 바꿔
+        글자 깨짐(□)을 막습니다. θ, √, ² 처럼 보조 폰트에 있는 기호는 그대로 둡니다.
         """
         cleaned = []
         for ch in text:
-            if ch in [" ", "\n", "\t"]:
+            if ch.isspace() or self.font_supports_char(font_name, ch) or ord(ch) in self.symbol_cmap():
                 cleaned.append(ch)
-            elif 0xAC00 <= ord(ch) <= 0xD7A3 or 0x3131 <= ord(ch) <= 0x318E:
-                # 한글은 100% 보존
-                cleaned.append(ch)
-            elif ch in MATH_FALLBACK_MAP:
-                if not self.font_supports_char(font_name, ch):
-                    cleaned.append(MATH_FALLBACK_MAP[ch])
-                else:
-                    cleaned.append(ch)
-            elif not self.font_supports_char(font_name, ch):
-                # 미지원 일반 특수문자
-                cleaned.append(MATH_FALLBACK_MAP.get(ch, ""))
             else:
-                cleaned.append(ch)
+                cleaned.append(MATH_FALLBACK_MAP.get(ch, ""))
         return "".join(cleaned)
 
     def wrap_text(self, text: str, font_name: str, font_size: int, max_width: int) -> List[str]:
         """지정된 최대 너비에 맞게 텍스트를 줄바꿈합니다 (단어가 길거나 수식인 경우 글자 단위 분할로 절대 잘리지 않음)."""
-        cleaned_text = clean_latex_to_handwriting(text)
-        font = self.load_font(font_name, font_size)
-        sanitized = self.sanitize_math_text(cleaned_text, font_name)
+        sanitized = self.sanitize_math_text(clean_latex_to_handwriting(text), font_name)
+
+        def width(t: str) -> float:
+            return self.measure(t, font_name, font_size)
+
         lines = []
         for raw_line in sanitized.split("\n"):
             if not raw_line.strip():
                 lines.append("")
                 continue
-            
-            words = raw_line.split(" ")
+
             curr_line = ""
-            for word in words:
+            for word in raw_line.split(" "):
                 test_line = f"{curr_line} {word}".strip() if curr_line else word
-                bbox = font.getbbox(test_line)
-                width = bbox[2] - bbox[0]
-                if width <= max_width:
+                if width(test_line) <= max_width:
                     curr_line = test_line
-                else:
-                    if curr_line:
-                        lines.append(curr_line)
-                        curr_line = ""
-                    
-                    bbox_word = font.getbbox(word)
-                    if (bbox_word[2] - bbox_word[0]) <= max_width:
-                        curr_line = word
+                    continue
+                if curr_line:
+                    lines.append(curr_line)
+                    curr_line = ""
+                if width(word) <= max_width:
+                    curr_line = word
+                    continue
+                # 단어/수식 자체가 max_width보다 긴 경우 글자 단위로 안전하게 분할
+                sub_line = ""
+                for ch in word:
+                    if width(sub_line + ch) <= max_width:
+                        sub_line += ch
                     else:
-                        # 단어/수식 자체가 max_width보다 긴 경우 글자 단위로 안전하게 분할
-                        sub_line = ""
-                        for ch in word:
-                            test_sub = sub_line + ch
-                            bbox_sub = font.getbbox(test_sub)
-                            if (bbox_sub[2] - bbox_sub[0]) <= max_width:
-                                sub_line = test_sub
-                            else:
-                                if sub_line:
-                                    lines.append(sub_line)
-                                sub_line = ch
-                        curr_line = sub_line
+                        if sub_line:
+                            lines.append(sub_line)
+                        sub_line = ch
+                curr_line = sub_line
             if curr_line:
                 lines.append(curr_line)
         return lines
@@ -385,19 +478,30 @@ class HandwritingEngine:
         font_size: int,
         pen_style_name: str = "파란색 볼펜",
         line_spacing: int = 12,
-        apply_jitter: bool = True
+        apply_jitter: bool = True,
+        color: Optional[Tuple[int, int, int, int]] = None
     ) -> Tuple[Image.Image, Tuple[int, int]]:
         """
         사람이 직접 쓴 듯한 자연스러운 텍스트(약간의 흔들림, 회전, 투명도 변화)를 그립니다.
+        color를 주면 펜 색 대신 그 색으로 씁니다 (예: 그림 위에 파란 펜으로 길이 적기).
         """
         font = self.load_font(font_name, font_size)
         style = PEN_STYLES.get(pen_style_name, list(PEN_STYLES.values())[0])
-        base_color = style["color"]
+        base_color = color or style["color"]
         jitter_y = style["jitter_y"] if apply_jitter else 0
         rot_range = style["rotation_deg"] if apply_jitter else 0
         alpha_var = style["alpha_var"] if apply_jitter else 0
 
         overlay = Image.new("RGBA", base_img.size, (255, 255, 255, 0))
+
+        # 모든 단어를 같은 기준선(baseline)에 맞춰 씁니다.
+        # (단어마다 자기 글자 윗선에 맞추면 '-', '=' 처럼 키 작은 기호가 위로 붕 떠 보입니다)
+        cap = self.cap_height(font_name, font_size)
+        symbol_font = self.load_symbol_font(font_size)
+        metric_fonts = [font] + ([symbol_font] if symbol_font is not None else [])
+        ascent = max(f.getmetrics()[0] for f in metric_fonts)
+        descent = max(f.getmetrics()[1] for f in metric_fonts)
+        pad = 10
 
         curr_x, curr_y = start_pos
         max_x = curr_x
@@ -409,6 +513,7 @@ class HandwritingEngine:
                 curr_y += font_size + line_spacing
                 continue
 
+            baseline_y = curr_y + cap
             line_x = curr_x
             words = line_sanitized.split(" ")
             for i, word in enumerate(words):
@@ -417,9 +522,7 @@ class HandwritingEngine:
                     continue
 
                 word_to_draw = word + (" " if i < len(words) - 1 else "")
-                bbox = font.getbbox(word_to_draw)
-                word_w = bbox[2] - bbox[0]
-                word_h = bbox[3] - bbox[1]
+                word_w = self.measure(word_to_draw, font_name, font_size)
 
                 dy = random.uniform(-jitter_y, jitter_y)
                 angle = random.uniform(-rot_range, rot_range)
@@ -427,21 +530,20 @@ class HandwritingEngine:
                 actual_alpha = max(110, min(255, base_color[3] + a_offset))
                 actual_color = (base_color[0], base_color[1], base_color[2], actual_alpha)
 
-                pad = 10
-                patch_w = max(1, word_w + pad * 2)
-                patch_h = max(1, word_h + pad * 2)
+                patch_w = max(1, int(word_w) + pad * 2)
+                patch_h = ascent + descent + pad * 2
                 patch = Image.new("RGBA", (patch_w, patch_h), (255, 255, 255, 0))
-                patch_draw = ImageDraw.Draw(patch)
-                patch_draw.text((pad, pad - bbox[1]), word_to_draw, font=font, fill=actual_color)
+                self.draw_runs(ImageDraw.Draw(patch), (pad, pad + ascent), word_to_draw, font_name, font_size, actual_color)
 
                 if abs(angle) > 0.1:
                     rotated_patch = patch.rotate(angle, resample=Image.BICUBIC, expand=True)
                 else:
                     rotated_patch = patch
 
-                draw_x = int(line_x - pad)
-                draw_y = int(curr_y + dy - pad)
-                overlay.alpha_composite(rotated_patch, (draw_x, draw_y))
+                # 회전으로 커진 만큼 보정해 글자 중심 위치를 유지
+                draw_x = int(line_x - pad - (rotated_patch.width - patch_w) / 2)
+                draw_y = int(baseline_y - ascent - pad + dy - (rotated_patch.height - patch_h) / 2)
+                overlay.alpha_composite(rotated_patch, (max(0, draw_x), max(0, draw_y)))
 
                 line_x += word_w
                 max_x = max(max_x, line_x)
@@ -495,10 +597,13 @@ class HandwritingEngine:
         base_img: Image.Image,
         bbox: Tuple[float, float, float, float],
         color: Tuple[int, int, int, int] = (16, 45, 142, 235),
-        width: int = 2
+        width: int = 2,
+        left_room: Optional[float] = None
     ) -> Image.Image:
         """
         수학 해설지에서 최종 정답 주위에 사람이 손으로 펜을 돌려 그린 듯한 자연스러운 타원 동그라미를 그립니다.
+        left_room: 정답 왼쪽에 있는 여백(px). 주면 동그라미가 그보다 왼쪽으로 나가지 않도록
+        중심을 오른쪽으로 옮겨 "정답:" 글자를 덮지 않게 합니다.
         """
         overlay = Image.new("RGBA", base_img.size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(overlay)
@@ -506,10 +611,14 @@ class HandwritingEngine:
         x1, y1, x2, y2 = bbox
         cx = (x1 + x2) / 2
         cy = (y1 + y2) / 2
-        pad_x = 10
+        pad_x = 5
         pad_y = 6
-        rx = max(18.0, (x2 - x1) / 2 + pad_x) * random.uniform(0.98, 1.08)
-        ry = max(16.0, (y2 - y1) / 2 + pad_y) * random.uniform(0.95, 1.05)
+        rx = max(12.0, (x2 - x1) / 2 + pad_x) * random.uniform(0.98, 1.08)
+        ry = max(14.0, (y2 - y1) / 2 + pad_y) * random.uniform(0.95, 1.05)
+        if left_room is not None:
+            # 흔들림(±0.8)과 선 굵기까지 고려한 동그라미의 가장 왼쪽 끝이 여백 안에 들어오게
+            reach = rx + 0.8 + width / 2
+            cx = max(cx, x1 - left_room + reach)
 
         points = []
         steps = 45

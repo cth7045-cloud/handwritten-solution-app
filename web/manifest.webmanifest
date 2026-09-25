@@ -1,0 +1,11 @@
+{
+  "name": "손글씨 해설 노트",
+  "short_name": "손글씨해설",
+  "description": "문제 사진을 올리면 AI가 풀어서 손글씨 해설지를 만들어 드립니다.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#1d3a8a",
+  "lang": "ko",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

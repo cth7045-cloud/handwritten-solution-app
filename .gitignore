@@ -29,3 +29,6 @@ create_*.py
 start_server.py
 test_synthesis.py
 
+
+# 로컬 비밀 설정
+.env
