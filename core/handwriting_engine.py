@@ -478,14 +478,16 @@ class HandwritingEngine:
         font_size: int,
         pen_style_name: str = "파란색 볼펜",
         line_spacing: int = 12,
-        apply_jitter: bool = True
+        apply_jitter: bool = True,
+        color: Optional[Tuple[int, int, int, int]] = None
     ) -> Tuple[Image.Image, Tuple[int, int]]:
         """
         사람이 직접 쓴 듯한 자연스러운 텍스트(약간의 흔들림, 회전, 투명도 변화)를 그립니다.
+        color를 주면 펜 색 대신 그 색으로 씁니다 (예: 그림 위에 파란 펜으로 길이 적기).
         """
         font = self.load_font(font_name, font_size)
         style = PEN_STYLES.get(pen_style_name, list(PEN_STYLES.values())[0])
-        base_color = style["color"]
+        base_color = color or style["color"]
         jitter_y = style["jitter_y"] if apply_jitter else 0
         rot_range = style["rotation_deg"] if apply_jitter else 0
         alpha_var = style["alpha_var"] if apply_jitter else 0

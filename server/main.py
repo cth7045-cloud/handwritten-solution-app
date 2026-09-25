@@ -25,6 +25,7 @@ from PIL import Image
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from core.annotation_engine import clean_annotations
 from core.gemini_solver import solve_problem_with_gemini
 
 from . import api_auth
@@ -78,6 +79,8 @@ def _clean_solution(raw: Dict[str, Any]) -> Dict[str, Any]:
         "has_diagram": bool(raw.get("has_diagram")) and diagram is not None,
         "diagram": diagram,
         "used_model": text("used_model"),
+        # 문제 그림 위에 직접 그릴 표시 (길이, 각, 강조선, 정답 체크 등)
+        "figure_annotations": clean_annotations(raw.get("figure_annotations")),
     }
 
 
@@ -177,6 +180,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         layout: str = Form("margin"),
         postit_color: str = Form("yellow"),
         seed: int = Form(0),
+        marks: bool = Form(True),
         user: dict = Depends(current_user),
         store: Store = Depends(get_store),
     ):
@@ -199,7 +203,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             except (TypeError, ValueError):
                 raise HTTPException(status_code=422, detail="풀이 데이터가 올바른 JSON이 아닙니다.")
             img = _read_image(image.file.read())
-        png = render_solution(img, _clean_solution(parsed), font, pen, layout, postit_color, seed)
+        png = render_solution(img, _clean_solution(parsed), font, pen, layout, postit_color, seed, marks)
         return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
     # ---------- 풀이 기록 ----------

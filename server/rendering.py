@@ -11,6 +11,7 @@ from typing import Any, Dict
 
 from PIL import Image, ImageOps
 
+from core.annotation_engine import FigureAnnotator
 from core.handwriting_engine import HandwritingEngine
 from core.overlay_composer import OverlayComposer
 
@@ -22,6 +23,7 @@ MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 _engine = HandwritingEngine(fonts_dir="fonts")
 _composer = OverlayComposer(_engine)
+_annotator = FigureAnnotator(_engine)
 # 엔진이 전역 random 모듈을 쓰므로, seed 재현성을 위해 렌더링을 직렬화합니다(렌더 1회 ~100ms).
 _render_lock = threading.Lock()
 
@@ -61,12 +63,17 @@ def render_solution(
     layout: str,
     postit_color: str = "yellow",
     seed: int = 0,
+    marks: bool = True,
 ) -> bytes:
-    """풀이 JSON을 선택한 스타일로 원본 이미지에 합성하고 PNG 바이트를 반환합니다."""
+    """풀이 JSON을 선택한 스타일로 원본 이미지에 합성하고 PNG 바이트를 반환합니다.
+    marks=True면 먼저 문제 그림 위에 길이·각·강조선·정답 체크 같은 표시를 그린 뒤 풀이를 붙입니다."""
     font_name = FONTS[font]
     pen_style = PENS[pen]
     with _render_lock:
         random.seed(seed)
+        annotations = solution.get("figure_annotations") or []
+        if marks and annotations:
+            base_img = _annotator.annotate(base_img, annotations, font_name, pen_style)
         if layout == "postit":
             out = _composer.compose_postit_mode(base_img, solution, font_name, pen_style, postit_color_name=POSTITS[postit_color])
         elif layout == "notebook":

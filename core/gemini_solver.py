@@ -48,6 +48,29 @@ HANDWRITING_MATH_RULES = """
 - 한 줄은 공책 한 줄에 들어갈 정도(대략 40자 이내)로 짧게 씁니다.
 """
 
+# 문제 그림 위에 직접 표시하며 푸는 방식 (강사가 시험지 그림에 펜으로 적는 것처럼)
+FIGURE_ANNOTATION_RULES = """
+[★ 문제 그림 위에 직접 표시하기 (figure_annotations) ★]
+실제 강사가 시험지의 그림(도형, 그래프, 좌표 그림)과 선택지 위에 펜으로 표시하며 푸는 것처럼,
+이미지 위에 그릴 표시를 "figure_annotations" 배열로 주세요. 시스템이 원본 사진 위에 손글씨로 그려 넣습니다.
+- 좌표는 업로드된 이미지 전체 기준 [y, x] 순서이며 0~1000으로 정규화합니다. (왼쪽 위 [0, 0], 오른쪽 아래 [1000, 1000])
+- box는 [ymin, xmin, ymax, xmax] (0~1000) 입니다.
+- 그림 속 꼭짓점·점의 위치를 정확히 보고 좌표를 정하세요. 글자는 선·글자를 가리지 않는 빈 곳 좌표에 둡니다.
+- 풀이에 실제로 쓰이는 핵심 표시만 4~12개 넣고, 글자는 짧게(8자 이내, note는 20자 이내) 씁니다.
+- color는 "blue", "red", "orange", "green" 중 선택하거나 생략(펜 색)합니다.
+사용 가능한 type:
+  {"type": "label", "point": [y, x], "text": "3a", "color": "blue"}          // 변 옆 빈 곳에 길이·값 적기
+  {"type": "highlight", "from": [y, x], "to": [y, x], "color": "orange"}    // 그림 속 기존 선분을 형광펜으로 강조
+  {"type": "line", "from": [y, x], "to": [y, x], "dashed": true}            // 보조선 새로 긋기
+  {"type": "angle", "vertex": [y, x], "toward1": [y, x], "toward2": [y, x], "text": "θ"}  // 꼭짓점에서 두 방향 사이 각 표시
+  {"type": "note", "point": [y, x], "text": "cos α = 4/5", "color": "red"}  // 그림 옆 여백에 짧은 메모
+  {"type": "check", "point": [y, x]}                                         // 정답 선택지 번호(예: ④) 위치에 체크
+  {"type": "circle", "box": [ymin, xmin, ymax, xmax]}                        // 옳은 보기(ㄱ, ㄷ)나 핵심 값에 동그라미
+  {"type": "strike", "box": [ymin, xmin, ymax, xmax]}                        // 틀린 보기(ㄴ)에 빗금
+- 객관식이면 정답 선택지에 "check"를, <보기> 문제면 옳은 보기에 "circle", 틀린 보기에 "strike"를 넣으세요.
+- 문제에 그림도 선택지도 없으면 "figure_annotations": [] 로 두세요.
+"""
+
 # 기본 우선순위 모델 목록 (실제 존재하는 최신 초고속 비전 플래그십 순서)
 BASE_MODEL_PRIORITY = [
     "gemini-2.5-flash",
@@ -231,7 +254,7 @@ def solve_problem_with_gemini(
     "highlight": "intersection"
 }
 
-""" + HANDWRITING_MATH_RULES + """
+""" + HANDWRITING_MATH_RULES + FIGURE_ANNOTATION_RULES + """
 
 반드시 아래 JSON 형식으로만 응답해주세요. 마크다운 ```json ... ``` 태그 없이 순수 JSON 문자열만 출력하세요:
 {
@@ -246,7 +269,11 @@ def solve_problem_with_gemini(
         "핵심 수식 2줄 ⇒ 키워드"
     ],
     "final_answer": "최종 정답 단답형 값",
-    "tip": "실전 킬러 핵심 포인트 팁"
+    "tip": "실전 킬러 핵심 포인트 팁",
+    "figure_annotations": [
+        {"type": "label", "point": [520, 310], "text": "3", "color": "blue"},
+        {"type": "check", "point": [905, 640]}
+    ]
 }
 """
         else:
@@ -258,7 +285,7 @@ def solve_problem_with_gemini(
   예: "① 좌표를 잡는다: O(0, 0), A(1, 0), B(0, 1)", "② 1 - cos θ ≈ θ²/2 를 이용해 근사한다"
 - 단계 번호는 ①②③… 을 쓰고, 전체 6~15단계로 기초부터 차근차근 설명합니다.
 - 쓰인 개념(공식, 정리)의 이름을 한 번은 밝혀 주세요. 예: "삼각함수의 극한", "근과 계수의 관계"
-""" + HANDWRITING_MATH_RULES + """
+""" + HANDWRITING_MATH_RULES + FIGURE_ANNOTATION_RULES + """
 [★ 그래프/다이어그램 지침 ★]
 함수 개형, 부등식의 해, 집합처럼 그림이 이해를 크게 돕는 경우에만 "has_diagram": true와 "diagram"을 작성하세요.
 문제에 이미 그림(도형, 좌표 그림)이 있고 그것을 다시 그리는 것뿐이라면 "has_diagram": false로 두세요.
@@ -282,7 +309,11 @@ def solve_problem_with_gemini(
         "② 두 번째 단계 설명: 수식"
     ],
     "final_answer": "최종 정답 또는 결론",
-    "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트"
+    "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트",
+    "figure_annotations": [
+        {"type": "label", "point": [520, 310], "text": "3", "color": "blue"},
+        {"type": "check", "point": [905, 640]}
+    ]
 }
 """
 

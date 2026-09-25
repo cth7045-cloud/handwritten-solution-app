@@ -12,6 +12,7 @@ const state = {
   pen: "deepblue",
   layout: "margin",
   postit: "yellow",
+  marks: true, // 문제 그림 위에 직접 표시
   seed: 1,
   solution: null,
   solveId: null,
@@ -34,6 +35,7 @@ const els = {
   fontOptions: $("font-options"),
   layoutOptions: $("layout-options"),
   postitOptions: $("postit-options"),
+  marksToggle: $("marks-toggle"),
   generateBtn: $("generate-btn"),
   status: $("status"),
   resultBox: $("result-box"),
@@ -137,6 +139,18 @@ function onStyleChange(kind, id) {
     scheduleRender(`✓ ${what} 변경: ${name} — 새 스타일로 다시 썼습니다.`);
   } else {
     setStatus(`✓ ${what} 선택: ${name} — 해설을 만들면 이 스타일로 씁니다.`);
+  }
+}
+
+function onMarksToggle() {
+  state.marks = els.marksToggle.checked;
+  const count = state.solution?.figure_annotations?.length || 0;
+  if (!state.solution) {
+    setStatus(state.marks ? "✓ 그림 위 표시 켬 — 문제 그림에 길이·각도·정답 체크를 적습니다." : "✓ 그림 위 표시 끔");
+  } else if (state.marks && count === 0) {
+    setStatus("이 풀이에는 그림 위에 표시할 내용이 없습니다.");
+  } else {
+    scheduleRender(state.marks ? `✓ 그림 위 표시 켬 (${count}개) — 다시 썼습니다.` : "✓ 그림 위 표시 끔 — 다시 썼습니다.");
   }
 }
 
@@ -316,6 +330,7 @@ async function renderResult(doneMsg) {
   form.append("layout", state.layout);
   form.append("postit_color", state.postit);
   form.append("seed", String(state.seed));
+  form.append("marks", state.marks ? "true" : "false");
 
   showBusy("✎ 다시 쓰는 중…");
   let aborted = false;
@@ -440,6 +455,7 @@ export async function initStudio({ onUsageChange }) {
   onUsage = onUsageChange;
   bindImageInputs();
   els.generateBtn.addEventListener("click", generate);
+  els.marksToggle.addEventListener("change", onMarksToggle);
   els.rewriteBtn.addEventListener("click", () => {
     state.seed = newSeed();
     renderResult("✓ 같은 풀이를 새 필체로 다시 썼습니다.");
