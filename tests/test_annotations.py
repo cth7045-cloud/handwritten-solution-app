@@ -106,3 +106,21 @@ def test_solve_keeps_cleaned_annotations(client, monkeypatch):
     res = client.post("/api/solve", files={"image": ("p.png", _png(), "image/png")}, data={"mode": "killer_tutor"})
     assert res.status_code == 200
     assert len(res.json()["solution"]["figure_annotations"]) == len(GOOD)
+
+
+def test_label_moves_off_printed_letters():
+    from core.annotation_engine import find_clear_spot
+    occ = np.zeros((200, 300), dtype=bool)
+    occ[90:110, 140:160] = True  # 꼭짓점 글자 'A' 자리
+    x, y = find_clear_spot(occ, 140, 90, 20, 20, radius=40)
+    assert occ[int(y):int(y) + 20, int(x):int(x) + 20].mean() < 0.05
+    assert abs(x - 140) + abs(y - 90) <= 60  # 멀리 가지 않음
+    assert find_clear_spot(occ, 10, 10, 20, 20, radius=40) == (10, 10)  # 빈 곳이면 그대로
+
+
+def test_wide_bogi_box_marks_only_leading_symbol():
+    from core.annotation_engine import _symbol_box
+    xy = lambda p: (p[1], p[0])  # 1000x1000 이미지
+    x1, y1, x2, y2 = _symbol_box(xy, [400, 80, 500, 700], 1000)  # 두 줄짜리 보기 문장 전체
+    assert (x2 - x1) < 80 and (y2 - y1) <= 50
+    assert _symbol_box(xy, [400, 80, 440, 120], 1000) == (80, 400, 120, 440)  # 작은 상자는 그대로

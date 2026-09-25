@@ -4,7 +4,8 @@ google-genai SDK를 사용하며, API 키가 없을 때를 위한 Mock 모드도
 """
 import os
 import json
-import base64
+import re
+import time
 from typing import Dict, Any, List, Optional
 
 try:
@@ -32,9 +33,9 @@ def format_model_name(raw_name: Optional[str]) -> str:
     if not raw_name:
         return "Gemini 3.8 Flash"
     cleaned = raw_name.replace("models/", "").strip()
-    for k, v in MODEL_DISPLAY_NAMES.items():
+    for k in sorted(MODEL_DISPLAY_NAMES, key=len, reverse=True):
         if k in cleaned:
-            return v
+            return MODEL_DISPLAY_NAMES[k]
     return cleaned
 
 # 두 풀이 방식이 함께 쓰는 손글씨 수식 표기 규칙
@@ -56,6 +57,7 @@ FIGURE_ANNOTATION_RULES = """
 - 좌표는 업로드된 이미지 전체 기준 [y, x] 순서이며 0~1000으로 정규화합니다. (왼쪽 위 [0, 0], 오른쪽 아래 [1000, 1000])
 - box는 [ymin, xmin, ymax, xmax] (0~1000) 입니다.
 - 그림 속 꼭짓점·점의 위치를 정확히 보고 좌표를 정하세요. 글자는 선·글자를 가리지 않는 빈 곳 좌표에 둡니다.
+- 그림에 이미 인쇄된 점 이름(A, B, P, O 등)은 다시 쓰지 마세요. label은 길이·값·각도처럼 새로 알아낸 정보만 적습니다.
 - 풀이에 실제로 쓰이는 핵심 표시만 4~12개 넣고, 글자는 짧게(8자 이내, note는 20자 이내) 씁니다.
 - color는 "blue", "red", "orange", "green" 중 선택하거나 생략(펜 색)합니다.
 사용 가능한 type:
@@ -68,6 +70,7 @@ FIGURE_ANNOTATION_RULES = """
   {"type": "circle", "box": [ymin, xmin, ymax, xmax]}                        // 옳은 보기(ㄱ, ㄷ)나 핵심 값에 동그라미
   {"type": "strike", "box": [ymin, xmin, ymax, xmax]}                        // 틀린 보기(ㄴ)에 빗금
 - 객관식이면 정답 선택지에 "check"를, <보기> 문제면 옳은 보기에 "circle", 틀린 보기에 "strike"를 넣으세요.
+- circle/strike의 box는 문장 전체가 아니라 보기 기호(ㄱ, ㄴ, ㄷ)나 선택지 번호(①~⑤)만 작게 감싸세요.
 - 문제에 그림도 선택지도 없으면 "figure_annotations": [] 로 두세요.
 """
 
@@ -79,6 +82,18 @@ BASE_MODEL_PRIORITY = [
     "gemini-2.5-pro",
     "gemini-1.5-pro",
 ]
+
+# 문제 풀이(이미지 -> 텍스트)에 쓸 수 없는 모델 이름에 들어가는 단어
+_NON_SOLVER_MODEL_WORDS = ("tts", "image", "live", "embedding", "transcribe", "computer-use", "customtools", "audio", "robotics", "aqa")
+
+
+def _model_priority(name: str):
+    """최신 flash -> flash-lite -> pro 순, 같은 계열은 버전이 높을수록 먼저. 정식판을 preview보다 먼저."""
+    m = re.search(r"gemini-(\d+(?:\.\d+)?)", name)
+    version = float(m.group(1)) if m else 0.0
+    tier = 0 if "flash" in name and "lite" not in name else 1 if "lite" in name else 2
+    return (tier, -version, "preview" in name or "exp" in name, name)
+
 
 # 모델 목록 조회는 요청마다 수백 ms가 걸리므로 프로세스당 한 번만 수행하고 캐시합니다.
 _candidate_models_cache: Optional[List[str]] = None
@@ -102,19 +117,13 @@ def resolve_candidate_models(client) -> List[str]:
         active_from_api = []
         for m in client.models.list():
             m_name = m.name.replace("models/", "") if hasattr(m, "name") and m.name else ""
-            if "gemini" in m_name and "image" not in m_name and "embedding" not in m_name and "transcribe" not in m_name:
+            if m_name.startswith("gemini") and not any(x in m_name for x in _NON_SOLVER_MODEL_WORDS):
                 active_from_api.append(m_name)
 
         if active_from_api:
-            # 3.x 모델이 API 목록에 실제로 존재하면 최우선 배치
-            v3_models = [m for m in active_from_api if "gemini-3" in m]
-            ordered = v3_models + [m for m in BASE_MODEL_PRIORITY if m in active_from_api]
-            for m in active_from_api:
-                if m not in ordered and not m.startswith("gemini-1."):
-                    ordered.append(m)
-            if ordered:
-                candidate_models = ordered
-                _candidate_models_cache = ordered
+            ordered = sorted(active_from_api, key=_model_priority)
+            candidate_models = ordered[:4]
+            _candidate_models_cache = candidate_models
     except Exception as e:
         print(f"[*] 모델 목록 동적 조회 생략: {e}")
     return candidate_models
@@ -268,8 +277,8 @@ def solve_problem_with_gemini(
         "키워드: 핵심 수식 1줄",
         "핵심 수식 2줄 ⇒ 키워드"
     ],
-    "final_answer": "최종 정답 단답형 값",
-    "tip": "실전 킬러 핵심 포인트 팁",
+    "final_answer": "객관식이면 선택지 번호와 값 함께 (예: ① 1/8, ③ ㄱ, ㄷ), 주관식이면 값 (예: 16)",
+    "tip": "실전 킬러 핵심 포인트 한 줄 (40자 이내)",
     "figure_annotations": [
         {"type": "label", "point": [520, 310], "text": "3", "color": "blue"},
         {"type": "check", "point": [905, 640]}
@@ -308,8 +317,8 @@ def solve_problem_with_gemini(
         "① 첫 번째 단계 설명: 수식",
         "② 두 번째 단계 설명: 수식"
     ],
-    "final_answer": "최종 정답 또는 결론",
-    "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트",
+    "final_answer": "객관식이면 선택지 번호와 값 함께 (예: ① 1/8, ③ ㄱ, ㄷ), 주관식이면 값 (예: 16)",
+    "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트 (40자 이내)",
     "figure_annotations": [
         {"type": "label", "point": [520, 310], "text": "3", "color": "blue"},
         {"type": "check", "point": [905, 640]}
@@ -324,48 +333,34 @@ def solve_problem_with_gemini(
         attempt_logs = []
 
         part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+        json_config = types.GenerateContentConfig(response_mime_type="application/json")
 
         for model_code in candidate_models:
-            # 1. generate_content with json config
-            try:
-                config = types.GenerateContentConfig(response_mime_type="application/json")
-                resp = client.models.generate_content(
-                    model=model_code,
-                    contents=[part, prompt],
-                    config=config
-                )
-                if resp and resp.text:
-                    response_text = resp.text
-                    used_model = model_code
-                    break
-            except Exception as e1:
-                # 2. generate_content without config (thinking 모델 또는 config 거부 시 폴백)
+            config = json_config
+            for attempt in range(3):
+                t0 = time.monotonic()
                 try:
-                    resp = client.models.generate_content(
-                        model=model_code,
-                        contents=[part, prompt]
-                    )
+                    resp = client.models.generate_content(model=model_code, contents=[part, prompt], config=config)
                     if resp and resp.text:
                         response_text = resp.text
                         used_model = model_code
-                        break
-                except Exception as e2:
-                    # 3. Interactions API 폴백
-                    try:
-                        b64_img = base64.b64encode(image_bytes).decode("utf-8")
-                        inter = client.interactions.create(
-                            model=model_code,
-                            input=[
-                                {"type": "text", "text": prompt},
-                                {"type": "image", "data": b64_img, "mime_type": mime_type}
-                            ]
-                        )
-                        if inter and hasattr(inter, "output_text") and inter.output_text:
-                            response_text = inter.output_text
-                            used_model = f"{model_code} (Interactions API)"
-                            break
-                    except Exception as e3:
-                        attempt_logs.append(f"[{model_code}] {e1}")
+                        print(f"[*] {model_code} 응답 {time.monotonic() - t0:.1f}초")
+                    else:
+                        attempt_logs.append(f"[{model_code}] 빈 응답")
+                    break
+                except Exception as e:
+                    code = getattr(e, "code", None)
+                    attempt_logs.append(f"[{model_code}] {e}")
+                    print(f"[!] {model_code} 실패({code}) {time.monotonic() - t0:.1f}초: {str(e)[:120]}")
+                    if code == 400 and config is not None and attempt == 0:
+                        config = None  # JSON 응답 설정을 거부하는 모델이면 설정 없이 한 번 더
+                        continue
+                    if code in (500, 503) and attempt == 0 and model_code == candidate_models[-1]:
+                        time.sleep(1.5)  # 일시적 과부하: 잠깐 쉬고 한 번만 재시도 (429 한도 초과는 재시도해도 소용없어 바로 다음 모델로)
+                        continue
+                    break  # 그 밖의 오류나 재시도 실패는 다음 모델로
+            if response_text:
+                break
 
         if not response_text:
             err_summary = "\n".join(attempt_logs[:4])

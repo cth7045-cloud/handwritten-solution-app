@@ -50,6 +50,18 @@ MAX_STEPS = 60
 MAX_TEXT_LEN = 600
 
 
+def friendly_ai_error(detail: str) -> str:
+    """구글 API의 긴 영문 오류를 사용자가 이해할 수 있는 안내로 바꿉니다 (자세한 내용은 서버 로그에)."""
+    logging.getLogger("solve").warning("AI 풀이 실패: %s", detail[:500])
+    if "RESOURCE_EXHAUSTED" in detail or "429" in detail:
+        return "오늘 AI 무료 사용량을 모두 썼습니다. 내일 다시 이용하거나 관리자에게 문의해 주세요."
+    if "UNAVAILABLE" in detail or "503" in detail or "high demand" in detail:
+        return "지금 AI 사용자가 많아 응답하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    if "API key" in detail or "API_KEY" in detail or "PERMISSION_DENIED" in detail:
+        return "서버의 AI 키 설정에 문제가 있습니다. 관리자에게 문의해 주세요."
+    return "AI 풀이 생성에 실패했습니다. 잠시 후 다시 시도해 주세요."
+
+
 def _read_image(data: bytes):
     try:
         return load_upload_image(data)
@@ -77,7 +89,8 @@ def _clean_solution(raw: Dict[str, Any]) -> Dict[str, Any]:
         "final_answer": text("final_answer"),
         "tip": text("tip"),
         "has_diagram": bool(raw.get("has_diagram")) and diagram is not None,
-        "diagram": diagram,
+        # AI가 그래프가 필요 없다고 했으면(has_diagram=false) 함께 온 diagram 은 버립니다
+        "diagram": diagram if raw.get("has_diagram") else None,
         "used_model": text("used_model"),
         # 문제 그림 위에 직접 그릴 표시 (길이, 각, 강조선, 정답 체크 등)
         "figure_annotations": clean_annotations(raw.get("figure_annotations")),
@@ -162,7 +175,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if not isinstance(result, dict) or result.get("error"):
             store.refund_solve(user["id"])
             detail = result.get("error_message") if isinstance(result, dict) else None
-            raise HTTPException(status_code=502, detail=f"AI 풀이 생성에 실패했습니다. {detail or ''}".strip())
+            raise HTTPException(status_code=502, detail=friendly_ai_error(detail or ""))
 
         solution = _clean_solution(result)
         solve_id = store.add_solve(user["id"], mode, solution, jpeg, elapsed_ms)

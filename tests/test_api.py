@@ -111,9 +111,12 @@ def test_solve_calls_ai_and_cleans_result(user_client, monkeypatch):
 def test_solve_ai_failure_returns_502(user_client, monkeypatch):
     client = user_client
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr("server.main.solve_problem_with_gemini", lambda **_: {"error": True, "error_message": "quota"})
+    monkeypatch.setattr(
+        "server.main.solve_problem_with_gemini",
+        lambda **_: {"error": True, "error_message": "[gemini-3.8-flash] 503 UNAVAILABLE. high demand"},
+    )
     res = client.post("/api/solve", files={"image": ("p.png", problem_png(), "image/png")}, data={"mode": "killer_tutor"})
-    assert res.status_code == 502 and "quota" in res.json()["detail"]
+    assert res.status_code == 502 and "잠시 후 다시" in res.json()["detail"]
 
 
 def test_serves_web_app(client):
@@ -131,3 +134,10 @@ def test_healthz_checks_database(client, monkeypatch):
 
     monkeypatch.setattr(client.app.state.store.engine, "connect", broken_connect)
     assert client.get("/healthz").status_code == 503
+
+
+def test_diagram_dropped_when_ai_says_no_diagram():
+    from server.main import _clean_solution
+    d = {"diagram_type": "geometry"}
+    assert _clean_solution({"steps": [], "has_diagram": False, "diagram": d})["diagram"] is None
+    assert _clean_solution({"steps": [], "has_diagram": True, "diagram": d})["diagram"] == d

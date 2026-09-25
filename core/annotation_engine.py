@@ -152,12 +152,10 @@ class FigureAnnotator:
             elif t == "angle":
                 self._draw_angle(draw, a, xy, color_of(a, pen), stroke, s, texts)
             elif t == "circle":
-                x1, y1 = xy([a["box"][0], a["box"][1]])
-                x2, y2 = xy([a["box"][2], a["box"][3]])
+                x1, y1, x2, y2 = _symbol_box(xy, a["box"], s)
                 _hand_ellipse(draw, (x1, y1, x2, y2), color_of(a, red), stroke, pad=max(3, s * 0.008))
             elif t == "strike":
-                x1, y1 = xy([a["box"][0], a["box"][1]])
-                x2, y2 = xy([a["box"][2], a["box"][3]])
+                x1, y1, x2, y2 = _symbol_box(xy, a["box"], s)
                 ext = (x2 - x1) * 0.15
                 _wobbly_line(draw, (x1 - ext, y2 + ext), (x2 + ext, y1 - ext), color_of(a, red), width=stroke + 1)
             elif t == "check":
@@ -166,13 +164,15 @@ class FigureAnnotator:
                 texts.append((t, a["text"], xy(a["point"]), color_of(a, pen)))
         base.alpha_composite(ink)
 
-        # 글자는 손글씨 엔진으로 (흔들림·기울기·필압)
+        # 글자는 손글씨 엔진으로 (흔들림·기울기·필압).
+        # 인쇄된 글자·선이나 이미 쓴 표시 위에 겹치지 않도록 잉크가 있는 곳을 기억해 둡니다.
+        occupied = np.asarray(base.convert("L")) < 170
         for kind, text, pos, color in texts:
-            base = self._draw_text(base, kind, text, pos, color, font_size, font_name, pen_style)
+            base = self._draw_text(base, kind, text, pos, color, font_size, font_name, pen_style, occupied)
         return base.convert("RGB")
 
     def _draw_text(self, base: Image.Image, kind: str, text: str, pos: Tuple[float, float], color: Color,
-                   font_size: int, font_name: str, pen_style: str) -> Image.Image:
+                   font_size: int, font_name: str, pen_style: str, occupied: np.ndarray) -> Image.Image:
         w, h = base.size
         x, y = pos
         size = font_size if kind == "label" else int(font_size * 0.85)
@@ -183,9 +183,12 @@ class FigureAnnotator:
         if kind == "label":
             # 라벨은 지정한 점이 글자 가운데에 오도록
             x, y = x - text_w / 2, y - line_h * len(lines) / 2
+        box_w, box_h = int(text_w) + 4, line_h * len(lines)
+        x, y = find_clear_spot(occupied, x, y, box_w, box_h, radius=int(line_h * 1.2))
         # 그림 밖으로 나가지 않게
         x = min(max(4, x), max(4, w - text_w - 6))
         y = min(max(4, y), max(4, h - line_h * len(lines) - 4))
+        occupied[int(y):int(y + box_h), int(x):int(x + box_w)] = True  # 다음 글자는 이 자리를 피합니다
         out, _ = self.engine.draw_handwritten_text(
             base, lines, (int(x), int(y)), font_name, size, pen_style,
             line_spacing=int(size * 0.3), apply_jitter=True, color=color,
@@ -218,6 +221,53 @@ class FigureAnnotator:
         pts = [(x - k, y - k * 0.05), (x - k * 0.25, y + k * 0.75), (x + k * 1.1, y - k * 1.1)]
         pts = [(px + random.uniform(-1, 1), py + random.uniform(-1, 1)) for px, py in pts]
         draw.line(pts, fill=color, width=width, joint="curve")
+
+
+def _symbol_box(xy, box: Sequence[float], s: int) -> Tuple[float, float, float, float]:
+    """circle/strike 상자를 픽셀로 바꿉니다. AI가 보기 문장 전체처럼 가로로 긴 상자를 주면
+    강사가 하듯 맨 앞 기호(ㄱ, ㄴ, ㄷ / ①~⑤) 부분만 표시하도록 왼쪽 정사각형 영역으로 줄입니다."""
+    x1, y1 = xy([box[0], box[1]])
+    x2, y2 = xy([box[2], box[3]])
+    h = y2 - y1
+    if x2 - x1 > 3 * h:
+        # 여러 줄짜리 보기도 기호는 첫 줄 맨 앞에 있으므로 한 줄 높이만큼만
+        sym = min(h, s * 0.05)
+        x2, y2 = x1 + sym * 1.3, y1 + sym
+    return x1, y1, x2, y2
+
+
+def find_clear_spot(occupied: np.ndarray, x: float, y: float, box_w: int, box_h: int,
+                    radius: int) -> Tuple[float, float]:
+    """(x, y)에 box_w x box_h 글자 상자를 놓을 때 잉크와 겹치면, radius 안에서 가장 덜 겹치는 가까운 자리를 찾습니다.
+    AI가 준 좌표가 꼭짓점 글자(A, E)나 선 바로 위를 가리켜도 글자가 겹치지 않게 합니다."""
+    h, w = occupied.shape
+    if box_w <= 0 or box_h <= 0:
+        return x, y
+    integral = np.pad(occupied.astype(np.int32).cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+
+    def overlap(cx: float, cy: float) -> float:
+        x0, y0 = int(min(max(0, cx), w - 1)), int(min(max(0, cy), h - 1))
+        x1, y1 = min(w, x0 + box_w), min(h, y0 + box_h)
+        if x1 <= x0 or y1 <= y0:
+            return 1.0
+        ink = integral[y1, x1] - integral[y0, x1] - integral[y1, x0] + integral[y0, x0]
+        return ink / (box_w * box_h)
+
+    if overlap(x, y) < 0.01:
+        return x, y
+    step = max(3, box_h // 4)
+    best = (overlap(x, y), 0.0, x, y)
+    for dy in range(-radius, radius + 1, step):
+        for dx in range(-radius, radius + 1, step):
+            d = (dx * dx + dy * dy) ** 0.5
+            if d > radius:
+                continue
+            # 겹침이 적을수록, 원래 자리에 가까울수록 좋음. 멀리 옮기면 엉뚱한 선분의 라벨처럼
+            # 보이므로 거리 벌점을 제곱으로 크게 줍니다 (꼭 필요한 만큼만 비켜 섬)
+            cost = overlap(x + dx, y + dy) + 0.08 * (d / radius) ** 2
+            if cost < best[0] + 0.08 * (best[1] / radius) ** 2:
+                best = (overlap(x + dx, y + dy), d, x + dx, y + dy)
+    return best[2], best[3]
 
 
 def snap_to_printed_line(gray: np.ndarray, p1: Tuple[float, float], p2: Tuple[float, float],
