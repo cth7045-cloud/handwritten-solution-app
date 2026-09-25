@@ -84,12 +84,23 @@ def init_db():
 
     conn.commit()
     
-    # 3. 최고 관리자 계정 생성 및 암호화 설정 (갈빙)
+    # 3. 최고 관리자 계정 생성 및 암호화 설정
+    # 비밀번호는 저장소에 두지 않고 ADMIN_PASSWORD 환경변수(또는 Streamlit secrets)로 받습니다.
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    admin_user = "갈빙"
-    admin_pw = "lhy8200@"
+    admin_user = os.environ.get("ADMIN_USERNAME", "갈빙")
+    admin_pw = os.environ.get("ADMIN_PASSWORD", "")
+    if not admin_pw:
+        try:
+            import streamlit as st
+            admin_pw = st.secrets.get("ADMIN_PASSWORD", "")
+        except Exception:
+            admin_pw = ""
+    if not admin_pw:
+        print("[!] ADMIN_PASSWORD가 설정되지 않아 관리자 계정을 만들거나 갱신하지 않았습니다.")
+        conn.close()
+        return
     pw_hash, salt = hash_password(admin_pw)
-    
+
     cursor.execute("SELECT id FROM users WHERE username = ?", (admin_user,))
     row = cursor.fetchone()
     if not row:

@@ -41,43 +41,93 @@
    └─ POST /api/render  이미지 + 풀이 JSON + 스타일 → PNG  (AI 없이 ~0.1초)
                          │
              [FastAPI 서버]  server/   ← Docker 컨테이너 1개 (Cloud Run 등)
-                         │
-             core/  손글씨·그래프·레이아웃 합성 엔진 (Pillow)
+                  │                    │
+   core/ 손글씨·그래프·레이아웃 엔진      PostgreSQL (Neon 등)
+         (Pillow)                       회원 · 로그인 세션 · 일일 사용량 · 풀이 기록
 ```
 
 - **AI 풀이와 렌더링을 분리**했기 때문에, 풀이가 한 번 나오면 펜·글씨체·레이아웃을 바꿀 때 AI를 다시 부르지 않고 즉시 다시 그립니다.
 - 같은 `seed`면 같은 필체 흔들림이 재현되고, **[다시 쓰기]** 를 누르면 새로운 흔들림으로 다시 씁니다.
 - AI가 만든 그래프 함수식은 `core/safe_math.py`의 안전한 수식 해석기로만 계산합니다(`eval` 미사용).
+- **회원제**: 로그인해야 풀이할 수 있고, 회원별 하루 풀이 한도(기본 20회, 관리자는 무제한)가 있습니다. AI 호출이 실패하면 한도에서 차감하지 않습니다.
+- **내 기록**: 풀이가 저장되어 나중에 다시 열고 펜·글씨체를 바꿔 다시 그릴 수 있습니다 (회원별 최근 100개).
+- **관리자 화면**: 회원 목록·오늘 사용량, 이용 정지/해제, 회원별 한도 변경, 비밀번호 초기화.
+- **보안**: 비밀번호 PBKDF2(60만 회) 해시, HttpOnly·SameSite 세션 쿠키(DB에는 토큰 해시만 저장), 로그인 연속 실패 제한, 다른 사이트에서 보낸 요청 차단, CSP 보안 헤더.
 
 ## 🚀 실행 방법
 
-### 웹 서비스 (권장)
+### 웹 서비스 (로컬)
 ```bash
 pip install -r server/requirements.txt
-export GEMINI_API_KEY=발급받은_키          # Windows: set GEMINI_API_KEY=...
+export GEMINI_API_KEY=발급받은_키
+export ADMIN_PASSWORD=관리자_비밀번호       # 관리자 아이디는 기본 "갈빙"
 uvicorn server.main:app --reload --port 8000
 ```
 브라우저에서 `http://localhost:8000` 접속. API 문서는 `http://localhost:8000/api/docs`.
+`DATABASE_URL`을 비우면 `data/app.db`(SQLite)를 씁니다. `.env.example`을 `.env`로 복사해 값을 채우고 `uvicorn server.main:app --reload --env-file .env`로 실행해도 됩니다.
 
 | 환경변수 | 설명 |
 |---|---|
 | `GEMINI_API_KEY` | (필수) 서버가 사용할 Gemini API 키. 사용자에게는 노출되지 않습니다. |
-| `GEMINI_MODELS` | (선택) 시도할 모델을 쉼표로 고정. 예: `gemini-2.5-flash`. 비우면 키에 열린 모델을 한 번 조회해 최신 순으로 사용합니다. |
-| `WEB_CONCURRENCY` | (선택) Docker 실행 시 워커 수, 기본 2 |
+| `ADMIN_PASSWORD` | (필수) 관리자 비밀번호. 서버가 시작할 때마다 이 값으로 관리자 계정을 맞춥니다. 바꾸면 관리자 기존 로그인은 모두 끊깁니다. |
+| `ADMIN_USERNAME` | 관리자 아이디, 기본 `갈빙` |
+| `DATABASE_URL` | 배포 시 필수. PostgreSQL 주소 (예: `postgresql://user:pw@host/db?sslmode=require`) |
+| `DAILY_SOLVE_LIMIT` | 회원 기본 하루 풀이 한도, 기본 20 (관리자 화면에서 회원별로 변경 가능) |
+| `ALLOW_SIGNUP` | `false`면 신규 가입을 막습니다 (기본 `true`) |
+| `HISTORY_LIMIT` | 회원별 보관할 풀이 기록 수, 기본 100 |
+| `SESSION_DAYS` | 로그인 유지 기간(일), 기본 365 |
+| `GEMINI_MODELS` | 시도할 모델을 쉼표로 고정. 예: `gemini-2.5-flash`. 비우면 키에 열린 모델을 한 번 조회해 최신 순으로 사용 |
+| `WEB_CONCURRENCY` | Docker 실행 시 워커 수, 기본 2 |
 
-### 24시간 배포 (Google Cloud Run 예시)
+> 비밀번호·API 키·DB 주소는 **절대 저장소에 커밋하지 마세요.** 이 저장소는 공개(public)입니다. 배포 환경의 Secret으로만 넣습니다.
+
+### 24시간 배포 (Google Cloud Run + Neon PostgreSQL)
+
+Cloud Run 컨테이너는 재시작하면 내부 파일이 사라지므로, 회원·기록은 외부 PostgreSQL에 저장해야 합니다.
+
+**1) 데이터베이스 만들기 (Neon, 무료 플랜 가능)**
+[neon.tech](https://neon.tech) 가입 → 프로젝트 생성(아시아 리전 선택) → 연결 문자열(`postgresql://...`)을 복사합니다.
+(Supabase, Cloud SQL 등 다른 PostgreSQL도 됩니다. 단 Supabase 무료 플랜은 7일간 사용이 없으면 일시 중지됩니다.)
+
+**2) Google Cloud 준비** ([gcloud CLI 설치](https://cloud.google.com/sdk/docs/install) 후)
+```bash
+gcloud auth login
+gcloud config set project <프로젝트ID>
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com artifactregistry.googleapis.com
+
+# 비밀값을 Secret Manager에 저장
+# (셸 기록에 남기기 싫으면 printf 없이 `gcloud secrets create 이름 --data-file=-` 실행 후 값을 붙여넣고 Ctrl+D)
+printf '%s' '<Gemini API 키>'      | gcloud secrets create gemini-key     --data-file=-
+printf '%s' '<관리자 비밀번호>'     | gcloud secrets create admin-password --data-file=-
+printf '%s' '<Neon 연결 문자열>'    | gcloud secrets create database-url   --data-file=-
+
+# Cloud Run 기본 서비스 계정이 Secret을 읽을 수 있게 권한 부여
+PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format='value(projectNumber)')
+gcloud projects add-iam-policy-binding $(gcloud config get-value project) \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+**3) 배포** (저장소 루트에서)
 ```bash
 gcloud run deploy handwritten-note --source . --region asia-northeast3 \
-  --allow-unauthenticated --min-instances 1 --memory 1Gi \
-  --set-env-vars GEMINI_MODELS=gemini-2.5-flash --set-secrets GEMINI_API_KEY=gemini-key:latest
+  --allow-unauthenticated --min-instances 1 --memory 1Gi --cpu 1 --timeout 120 \
+  --set-env-vars GEMINI_MODELS=gemini-2.5-flash,DAILY_SOLVE_LIMIT=20 \
+  --set-secrets GEMINI_API_KEY=gemini-key:latest,ADMIN_PASSWORD=admin-password:latest,DATABASE_URL=database-url:latest
 ```
-`--min-instances 1` 로 항상 1대를 켜 두면 첫 요청 지연(콜드 스타트)이 없습니다. 같은 `Dockerfile`로 Fly.io, Render, Railway에도 그대로 배포할 수 있습니다.
+배포가 끝나면 `https://handwritten-note-xxxx.asia-northeast3.run.app` 주소가 나옵니다. 폰·태블릿·PC 어디서나 접속하고, 브라우저 메뉴의 "홈 화면에 추가"로 앱처럼 쓸 수 있습니다.
+
+- `--min-instances 1`: 항상 1대를 켜 두어 첫 접속 지연(콜드 스타트)이 없습니다. 대신 켜져 있는 시간만큼 소액 과금되므로 [가격 계산기](https://cloud.google.com/products/calculator)로 확인하세요. 비용을 아끼려면 `0`으로 두면 됩니다(처음 접속만 몇 초 느려짐).
+- 관리자 비밀번호 변경: `printf '%s' '<새 비밀번호>' | gcloud secrets versions add admin-password --data-file=-` 후 같은 배포 명령을 다시 실행.
+- 코드 업데이트: 같은 `gcloud run deploy` 명령을 다시 실행하면 무중단으로 교체됩니다.
 
 ### 테스트
 ```bash
-pip install pytest httpx
-python -m pytest
+pip install -r server/requirements.txt pytest httpx
+python -m pytest                                   # SQLite
+TEST_DATABASE_URL=postgresql://... python -m pytest  # 실제 PostgreSQL로 검증
 ```
+GitHub에 push하면 `.github/workflows/test.yml`이 SQLite와 PostgreSQL 두 환경에서 자동으로 테스트합니다.
 
 ### (구버전) Streamlit 앱
 ```bash
@@ -100,10 +150,14 @@ streamlit run app.py
 handwritten-solution-app/
 ├── server/                 # 웹 API 서버 (FastAPI)
 │   ├── main.py             # /api/solve, /api/render, /api/styles, 정적 파일 제공
+│   ├── api_auth.py         # 회원가입/로그인/관리자 API
+│   ├── accounts.py         # 회원·세션·사용량·풀이 기록 저장소
+│   ├── db.py / config.py   # DB 스키마, 환경변수 설정
+│   ├── security.py         # 세션 쿠키, 로그인 시도 제한, 보안 헤더
 │   ├── rendering.py        # 업로드 이미지 전처리 + 합성 렌더링
 │   ├── catalog.py          # 폰트/펜/레이아웃 id ↔ 엔진 키 매핑
 │   └── requirements.txt
-├── web/                    # 프론트엔드 (index.html, app.js, styles.css, PWA manifest)
+├── web/                    # 프론트엔드 (로그인, 만들기, 내 기록, 관리자 화면 / PWA)
 ├── core/
 │   ├── gemini_solver.py    # Gemini 문제 인식 및 풀이 JSON 생성
 │   ├── handwriting_engine.py  # 손글씨 렌더링 (흔들림·회전·필압), LaTeX → 손글씨 수식 변환
