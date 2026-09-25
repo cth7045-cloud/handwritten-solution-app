@@ -88,3 +88,38 @@ def test_answer_circle_drawn_for_latex_answer(engine, monkeypatch, layout):
     # 레이아웃마다 글자 크기(18~28px)가 달라도 동그라미 폭은 '1/8' 글자 폭과 같아야 합니다
     assert engine.measure("1/8", FONT, 18) <= x2 - x1 <= engine.measure("1/8", FONT, 28)
     assert y2 > y1
+
+
+def _page_with_margin(w=1400, h=900):
+    """위쪽에 인쇄된 문제, 아래쪽 절반은 흰 여백인 문제집 사진 흉내."""
+    from PIL import ImageDraw
+    img = Image.new("RGB", (w, h), (250, 250, 250))
+    d = ImageDraw.Draw(img)
+    for y in range(60, 360, 28):
+        d.line([(80, y), (w - 80, y)], fill=(30, 30, 30), width=3)
+    return img
+
+
+def test_find_blank_region_detects_empty_margin():
+    from core.overlay_composer import find_blank_region
+    x, y, bw, bh = find_blank_region(_page_with_margin())
+    assert y >= 360 and bh >= 400 and bw >= 1000
+    # 여백이 없는(빽빽한) 사진은 None
+    busy = Image.effect_noise((800, 600), 80).convert("RGB")
+    assert find_blank_region(busy) is None
+
+
+def test_margin_mode_writes_inside_blank_area_without_extending():
+    base = _page_with_margin()
+    sol = {
+        "problem_title": "절댓값 방정식",
+        "steps": [f"{i}단계: x + {i} = {i + 2}" for i in range(1, 9)],
+        "final_answer": "2",
+        "tip": "구간을 나눠라",
+    }
+    random.seed(0)
+    out = OverlayComposer(HandwritingEngine()).compose_margin_mode(base, sol, "수험생 실전 필기체 (갈맷글)", "검정색 젤펜")
+    assert out.size == base.size  # 빈 종이를 덧붙이지 않음
+    diff = np.abs(np.asarray(out).astype(int) - np.asarray(base).astype(int)).sum(axis=2) > 40
+    assert diff[:360].sum() == 0  # 인쇄된 문제 부분은 건드리지 않음
+    assert diff[400:].sum() > 1000  # 여백에 풀이가 적힘

@@ -66,6 +66,58 @@ def detect_content_bounds(base_img: Image.Image) -> Tuple[int, int, int, int]:
     else:
         return int(orig_w * 0.05), int(orig_h * 0.05), int(orig_w * 0.95), int(orig_h * 0.8)
 
+def find_blank_region(base_img: Image.Image) -> Optional[Tuple[int, int, int, int]]:
+    """사진 속 '종이 색'으로 비어 있는 가장 큰 직사각형 여백을 찾아 (x, y, w, h)로 돌려줍니다.
+
+    가장 아래쪽 잉크 위치만 보던 방식은 태블릿/휴대폰 화면 캡처처럼 아래에 앱 아이콘·
+    내비게이션 바가 있으면 여백이 없다고 판단했습니다. 여기서는 종이 색(가장 흔한 밝은 색)과
+    같은 색으로 고르게 비어 있는 칸들만 모아 가장 큰 사각형을 고릅니다. 회색 앱 배경처럼
+    종이와 색이 다른 곳은 여백으로 치지 않습니다."""
+    gray = np.asarray(base_img.convert("L"), dtype=np.int16)
+    h, w = gray.shape
+    cell = max(6, round(w / 120))
+    rows, cols = h // cell, w // cell
+    if rows < 4 or cols < 4:
+        return None
+    blocks = gray[: rows * cell, : cols * cell].reshape(rows, cell, cols, cell)
+    c_min, c_max = blocks.min(axis=(1, 3)), blocks.max(axis=(1, 3))
+    c_mean = blocks.mean(axis=(1, 3))
+
+    uniform = (c_max - c_min) < 22
+    bright = c_mean[uniform & (c_mean > 170)]
+    if bright.size < rows * cols * 0.05:
+        return None
+    paper = float(np.median(bright[bright >= np.percentile(bright, 60)]))  # 가장 밝은 쪽 무리의 색 = 종이
+    free = uniform & (np.abs(c_mean - paper) < 14)
+
+    # 히스토그램 방식의 최대 직사각형
+    best = (0, 0, 0, 0, 0)  # area, row_top, col_left, n_rows, n_cols
+    heights = np.zeros(cols, dtype=int)
+    for r in range(rows):
+        heights = np.where(free[r], heights + 1, 0)
+        stack: List[int] = []
+        for c in range(cols + 1):
+            cur = heights[c] if c < cols else 0
+            while stack and heights[stack[-1]] >= cur:
+                top = stack.pop()
+                height = heights[top]
+                left = stack[-1] + 1 if stack else 0
+                width = c - left
+                if height * width > best[0]:
+                    best = (height * width, r - height + 1, left, height, width)
+            stack.append(c)
+    _, r0, c0, nr, nc = best
+    # 인쇄된 내용과 너무 붙지 않게 한 칸씩 안쪽으로
+    if nr < 3 or nc < 3:
+        return None
+    x, y = int((c0 + 1) * cell), int((r0 + 1) * cell)
+    bw, bh = int((nc - 2) * cell), int((nr - 2) * cell)
+    # 좁은 세로 띠(오른쪽 끝 여백 등)에 쓰면 수식이 잘게 끊겨 보기 나쁘므로 충분히 넓을 때만
+    if bw < max(300, w * 0.38) or bh < 60:
+        return None
+    return x, y, bw, bh
+
+
 class OverlayComposer:
     def __init__(self, engine: HandwritingEngine):
         self.engine = engine
@@ -114,6 +166,115 @@ class OverlayComposer:
         left_room = max(1.0, self.engine.measure(" ", font_name, font_size) - 2) if prefix.endswith(" ") else 1.0
         return self.engine.draw_answer_circle(img, bbox=(x1, y1, x2, y2), color=pen_color, width=2, left_room=left_room)
 
+    def _solution_lines(self, solution_data: Dict[str, Any], font_name: str, size: int, wrap_w: int) -> List[str]:
+        lines: List[str] = []
+        title = solution_data.get("problem_title", "")
+        if title:
+            lines.extend(self.engine.wrap_text(f"<{title}>", font_name, size, wrap_w))
+            lines.append("")
+        for step in solution_data.get("steps", []):
+            lines.extend(self.engine.wrap_text(step, font_name, size, wrap_w))
+        ans = format_answer(solution_data.get("final_answer", ""))
+        if ans:
+            lines.append("")
+            lines.extend(self.engine.wrap_text(f"∴ 정답: {ans}", font_name, size, wrap_w))
+        tip = solution_data.get("tip", "")
+        if tip:
+            lines.append("")
+            lines.extend(self.engine.wrap_text(f"★ 핵심 Tip: {tip}", font_name, size, wrap_w))
+        return lines
+
+    def _compose_in_blank_region(
+        self, base_img: Image.Image, solution_data: Dict[str, Any], font_name: str, pen_style: str
+    ) -> Optional[Image.Image]:
+        """사진 속 빈 여백에 풀이를 씁니다. 다 들어가지 않으면 남은 줄(과 그래프)을 사진 아래에 이어 씁니다.
+        쓸 만한 여백이 없으면 None (기존 방식으로 캔버스를 확장)."""
+        region = find_blank_region(base_img)
+        if region is None:
+            return None
+        rx, ry, rw, rh = region
+        orig_w, orig_h = base_img.size
+        pad = int(rw * 0.04)
+        wrap_w = rw - 2 * pad
+
+        # 다 들어가는 가장 큰 글자 크기를 찾고, 안 되면 적당한 크기로 나눠 씁니다
+        size_max = max(18, min(30, int(orig_w * 0.022)))
+        size_min = max(16, int(orig_w * 0.013))
+        chosen = None
+        for size in range(size_max, size_min - 1, -1):
+            spacing = int(size * 0.45)
+            lines = self._solution_lines(solution_data, font_name, size, wrap_w)
+            if len(lines) * (size + spacing) <= rh - pad:
+                chosen = (size, spacing, lines)
+                break
+        columns = 1
+        if chosen is None and rw >= 700:
+            # 여백이 넓으면 사람처럼 두 단으로 나눠 써서 여백 안에 다 넣어 봅니다
+            col_w = (rw - 3 * pad) // 2
+            for size in range(size_max, size_min - 1, -1):
+                spacing = int(size * 0.45)
+                lines = self._solution_lines(solution_data, font_name, size, col_w)
+                if -(-len(lines) // 2) * (size + spacing) <= rh - pad:
+                    chosen, columns, wrap_w = (size, spacing, lines), 2, col_w
+                    break
+        if chosen is None:
+            size = max(size_min, int(size_max * 0.85))
+            spacing = int(size * 0.45)
+            chosen = (size, spacing, self._solution_lines(solution_data, font_name, size, wrap_w))
+        size, spacing, lines = chosen
+        line_h = size + spacing
+        rows = max(0, (rh - pad) // line_h)
+        n_fit = min(len(lines), rows * columns)
+        if n_fit < 4:
+            return None  # 여백이 너무 작아 몇 줄 못 쓰면 기존 방식이 더 보기 좋음
+
+        diag_img = None
+        diagram_data = solution_data.get("diagram")
+        if diagram_data and isinstance(diagram_data, dict):
+            try:
+                diag_img = self.diagram_engine.render_diagram(diagram_data, font_name, pen_style, max_width=min(420, orig_w - 80))
+            except Exception as e:
+                print(f"[!] 다이어그램 렌더링 오류: {e}")
+
+        head, rest = lines[:n_fit], lines[n_fit:]
+        # 여백에서 줄이 끝나면 빈 줄로 시작하지 않게
+        while rest and not rest[0].strip():
+            rest.pop(0)
+
+        extra_h = 0
+        if rest or diag_img is not None:
+            extra_h = 40 + len(rest) * line_h + (diag_img.height + 30 if diag_img is not None else 0) + 30
+        bg = sample_background_color(base_img)
+        canvas = Image.new("RGBA", (orig_w, orig_h + extra_h), bg + (255,))
+        canvas.paste(base_img.convert("RGBA"), (0, 0))
+        ans = format_answer(solution_data.get("final_answer", ""))
+
+        if columns == 2:
+            first, second = head[:rows], head[rows:]
+            # 둘째 단이 빈 줄로 시작하지 않게
+            while second and not second[0].strip():
+                second.pop(0)
+            blocks = [(first, (rx + pad, ry + pad // 2)), (second, (rx + 2 * pad + wrap_w, ry + pad // 2))]
+        else:
+            blocks = [(head, (rx + pad, ry + pad // 2))]
+        for block, start in blocks:
+            canvas, _ = self.engine.draw_handwritten_text(canvas, block, start, font_name, size, pen_style, line_spacing=spacing)
+            canvas = self._draw_ans_circle_if_exists(canvas, block, ans, start, font_name, size, spacing, pen_style)
+
+        if extra_h:
+            draw = ImageDraw.Draw(canvas)
+            div_y = orig_h + 14
+            draw.line([(int(orig_w * 0.05), div_y), (int(orig_w * 0.95), div_y)], fill=(210, 218, 228, 200), width=1)
+            y = div_y + 26
+            if rest:
+                start2 = (rx + pad, y)
+                canvas, _ = self.engine.draw_handwritten_text(canvas, rest, start2, font_name, size, pen_style, line_spacing=spacing)
+                canvas = self._draw_ans_circle_if_exists(canvas, rest, ans, start2, font_name, size, spacing, pen_style)
+                y += len(rest) * line_h + 10
+            if diag_img is not None:
+                canvas.alpha_composite(diag_img, (max(10, (orig_w - diag_img.width) // 2), int(y)))
+        return canvas.convert("RGB")
+
     def compose_margin_mode(
         self,
         base_img: Image.Image,
@@ -129,6 +290,11 @@ class OverlayComposer:
         글씨가 삐져나오거나 잘리지 않고 고품질 학습 노트 형태로 완성되도록 보장합니다.
         그래프나 다이어그램이 있을 경우 최적의 위치에 자연스럽게 함께 렌더링합니다.
         """
+        # 0. 사진 속 빈 여백이 넉넉하면 그 안에 먼저 쓰고, 모자란 부분만 아래로 이어 씁니다
+        in_blank = self._compose_in_blank_region(base_img, solution_data, font_name, pen_style)
+        if in_blank is not None:
+            return in_blank
+
         orig_w, orig_h = base_img.size
         min_x, min_y, max_x, max_y = detect_content_bounds(base_img)
 
