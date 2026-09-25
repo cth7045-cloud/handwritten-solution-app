@@ -14,6 +14,22 @@ SOLVE_MODES = {
         "label": "친절한 개념 정석 풀이",
         "description": "개념과 풀이 단계를 기초부터 차근차근",
     },
+    "multi_method": {
+        "label": "여러 가지 풀이법 비교",
+        "description": "대수·그래프·도형 등 2~3가지 풀이를 나란히",
+    },
+    "wrong_note": {
+        "label": "오답노트형 풀이",
+        "description": "자주 하는 실수 → 바른 풀이 → 다시 안 틀리는 법",
+    },
+    "hint_steps": {
+        "label": "단계별 힌트형",
+        "description": "힌트를 먼저 보고 스스로 풀어 본 뒤 풀이 확인",
+    },
+    "report": {
+        "label": "탐구 레포트형 풀이",
+        "description": "문제 분석·개념·풀이·검산·결론을 보고서처럼",
+    },
 }
 
 # id(폰트 파일명, 확장자 제외) -> 엔진 폰트 키 (FONT_MAP의 한글 표시명)
@@ -31,6 +47,8 @@ LAYOUTS = {
     "margin": {"label": "여백 직접 필기", "description": "문제집 여백에 직접 풀이 (부족하면 아래로 확장)"},
     "postit": {"label": "포스트잇 부착", "description": "지문을 가리지 않는 메모지 위에 풀이"},
     "notebook": {"label": "모눈노트 확장", "description": "시험지 오른쪽에 격자 노트를 덧대어 풀이"},
+    "report": {"label": "A4 레포트", "description": "A4 레포트 용지에 보고서처럼 정리 (PDF 저장)"},
+    "cornell": {"label": "코넬노트", "description": "키워드 칸·필기 칸·요약 칸으로 나눈 정리 노트"},
 }
 
 POSTITS = {

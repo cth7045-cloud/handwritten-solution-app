@@ -16,7 +16,7 @@ import logging
 import os
 import random
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -78,6 +78,12 @@ def _clean_solution(raw: Dict[str, Any]) -> Dict[str, Any]:
         v = raw.get(key, "")
         return str(v)[:MAX_TEXT_LEN] if v is not None else ""
 
+    def text_list(key: str, limit: int, length: int) -> List[str]:
+        v = raw.get(key) or []
+        if not isinstance(v, list):
+            v = [v]
+        return [str(x)[:length] for x in v[:limit] if isinstance(x, (str, int, float)) and str(x).strip()]
+
     steps = raw.get("steps") or []
     if not isinstance(steps, list):
         steps = [steps]
@@ -94,6 +100,9 @@ def _clean_solution(raw: Dict[str, Any]) -> Dict[str, Any]:
         "used_model": text("used_model"),
         # 문제 그림 위에 직접 그릴 표시 (길이, 각, 강조선, 정답 체크 등)
         "figure_annotations": clean_annotations(raw.get("figure_annotations")),
+        # 레포트/코넬노트에 쓰는 핵심 개념 이름과 검산 줄 (없어도 됩니다)
+        "key_concepts": text_list("key_concepts", 6, 60),
+        "verification": text_list("verification", 10, MAX_TEXT_LEN),
     }
 
 
@@ -194,11 +203,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         postit_color: str = Form("yellow"),
         seed: int = Form(0),
         marks: bool = Form(True),
+        fmt: str = Form("png"),
         user: dict = Depends(current_user),
         store: Store = Depends(get_store),
     ):
         if font not in FONTS or pen not in PENS or layout not in LAYOUTS or postit_color not in POSTITS:
             raise HTTPException(status_code=422, detail="알 수 없는 스타일 옵션입니다.")
+        if fmt not in ("png", "pdf"):
+            raise HTTPException(status_code=422, detail="알 수 없는 저장 형식입니다.")
         if solve_id is not None:
             record = store.get_solve(user["id"], solve_id)
             if not record:
@@ -216,8 +228,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             except (TypeError, ValueError):
                 raise HTTPException(status_code=422, detail="풀이 데이터가 올바른 JSON이 아닙니다.")
             img = _read_image(image.file.read())
-        png = render_solution(img, _clean_solution(parsed), font, pen, layout, postit_color, seed, marks)
-        return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+        data = render_solution(img, _clean_solution(parsed), font, pen, layout, postit_color, seed, marks, fmt=fmt)
+        media = "application/pdf" if fmt == "pdf" else "image/png"
+        return Response(content=data, media_type=media, headers={"Cache-Control": "no-store"})
 
     # ---------- 풀이 기록 ----------
     @app.get("/api/history")

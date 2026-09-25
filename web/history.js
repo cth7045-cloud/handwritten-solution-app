@@ -9,7 +9,14 @@ let offset = 0;
 let onOpen = () => {};
 
 const dateFmt = new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-const MODE_LABEL = { killer_tutor: "1타 강사 압축", standard_concept: "개념 정석" };
+const MODE_LABEL = {
+  killer_tutor: "1타 강사 압축",
+  standard_concept: "개념 정석",
+  multi_method: "여러 풀이법",
+  wrong_note: "오답노트",
+  hint_steps: "단계별 힌트",
+  report: "탐구 레포트",
+};
 
 function card(item) {
   const el = document.createElement("article");

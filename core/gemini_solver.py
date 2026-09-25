@@ -74,6 +74,82 @@ FIGURE_ANNOTATION_RULES = """
 - 문제에 그림도 선택지도 없으면 "figure_annotations": [] 로 두세요.
 """
 
+# 정석 풀이와 같은 틀을 쓰되 "작성 원칙"만 다른 풀이 방식들
+_EXTRA_PERSONA = """
+당신은 친절하고 꼼꼼한 수학/과학 과외 선생님입니다.
+업로드된 문제집/교재 사진 속 문제를 파악하고, 학생이 공책에 손글씨로 옮겨 적을 풀이 노트를 작성해야 합니다.
+"""
+
+EXTRA_STYLE_PRINCIPLES = {
+    "multi_method": _EXTRA_PERSONA + """
+[★ 여러 가지 풀이법 비교 작성 원칙 ★]
+- 서로 다른 풀이 2~3가지를 보여 주세요. (예: 대수적 계산 / 그래프 이용 / 도형의 성질 / 특수값 대입 / 미분 이용)
+- 각 풀이의 첫 줄은 "[풀이 1] 방법 이름" 형식의 소제목이고, 이어서 3~6줄로 핵심만 씁니다.
+- 마지막 줄은 "[비교] 어떤 풀이가 언제 더 빠르고 안전한지" 한 줄입니다.
+- 정말로 풀이가 한 가지뿐인 단순 문제라면 [풀이 1] 정석 풀이, [풀이 2] 다른 방법으로 검산 으로 씁니다.
+- 각 줄의 결론이 같은 정답으로 모여야 합니다.
+""",
+    "wrong_note": _EXTRA_PERSONA + """
+[★ 오답노트형 풀이 작성 원칙 ★]
+- 학생이 이 문제에서 실제로 자주 틀리는 지점을 먼저 짚고, 바른 풀이와 재발 방지책을 적는 오답노트입니다.
+- steps 는 아래 세 구역으로 씁니다. 각 구역 첫 줄은 소제목입니다.
+  "[자주 하는 실수]" 다음 줄부터 1~3줄: 흔한 오개념이나 계산 실수, 그리고 그렇게 하면 나오는 틀린 답
+  "[바른 풀이]" 다음 줄부터 4~10줄: ①②③… 번호를 붙인 올바른 풀이
+  "[다시 틀리지 않으려면]" 다음 줄부터 1~2줄: 체크포인트
+- tip 에는 이 문제의 교훈을 한 줄로 씁니다.
+""",
+    "hint_steps": _EXTRA_PERSONA + """
+[★ 단계별 힌트형 풀이 작성 원칙 ★]
+- 학생이 스스로 풀어 보도록 힌트를 먼저 주고, 마지막에 풀이를 보여 줍니다.
+- steps 는 "[힌트 1]", "[힌트 2]", "[힌트 3]" 으로 시작하는 줄 2~4개를 먼저 씁니다.
+  힌트는 답을 바로 알려 주지 말고 "무엇을 먼저 구해야 할까?" 처럼 방향을 알려 주는 질문·단서로 씁니다.
+  힌트 1은 가장 가벼운 단서, 뒤로 갈수록 구체적인 단서입니다.
+- 그다음 "[풀이]" 한 줄, 이어서 ①②③… 번호를 붙인 풀이 4~10줄을 씁니다.
+""",
+    "report": _EXTRA_PERSONA + """
+[★ 탐구 레포트형 풀이 작성 원칙 ★]
+- A4 보고서에 옮겨 쓸 풀이입니다. 문장은 "~이다", "~한다" 체의 완결된 문장으로 씁니다.
+- steps 는 "[문제 분석]" 소제목과 1~3줄(주어진 조건과 구하는 것), 이어서 "[풀이]" 소제목과
+  ①②③… 번호를 붙인 6~14줄(각 줄: 무엇을 하는지 한 문장 + 수식)로 씁니다.
+- "verification" 에 다른 방법(특수값 대입, 역대입, 단위·범위 확인 등)으로 답을 확인하는 줄 1~3개를 씁니다.
+- tip 에는 이 문제로 알 수 있는 결론이나 배운 점을 한 문장(60자 이내)으로 씁니다.
+""",
+}
+
+STANDARD_PROMPT_TAIL = HANDWRITING_MATH_RULES + FIGURE_ANNOTATION_RULES + """
+[★ 그래프/다이어그램 지침 ★]
+함수 개형, 부등식의 해, 집합처럼 그림이 이해를 크게 돕는 경우에만 "has_diagram": true와 "diagram"을 작성하세요.
+문제에 이미 그림(도형, 좌표 그림)이 있고 그것을 다시 그리는 것뿐이라면 "has_diagram": false로 두세요.
+diagram_type 은 "coordinate_plane", "number_line", "venn", "geometry" 중 하나입니다.
+
+반드시 아래 JSON 형식으로만 응답해주세요. 마크다운 ```json ... ``` 태그 없이 순수 JSON 문자열만 출력하세요:
+{
+    "problem_title": "문제 유형이나 소제목",
+    "problem_summary": "인식한 문제 내용 한두 줄 요약",
+    "has_diagram": true,
+    "diagram": {
+        "diagram_type": "coordinate_plane",
+        "title": "y = x^2 - 4x + 3",
+        "x_range": [-1, 5],
+        "y_range": [-2, 6],
+        "functions": [{"expr": "x**2 - 4*x + 3", "color": "blue", "label": "y = f(x)"}],
+        "points": [{"x": 2, "y": -1, "label": "(2, -1)", "dashed": true}]
+    },
+    "steps": [
+        "[소제목] 위 작성 원칙의 형식을 따른 한 줄",
+        "① 설명: 수식"
+    ],
+    "verification": ["(탐구 레포트형만) 다른 방법으로 답 확인하는 줄"],
+    "final_answer": "객관식이면 선택지 번호와 값 함께 (예: ① 1/8, ③ ㄱ, ㄷ), 주관식이면 값 (예: 16)",
+    "tip": "한 줄 정리 (40자 이내)",
+    "key_concepts": ["이 문제에 쓰인 핵심 개념·공식 이름 1~4개 (각 15자 이내)"],
+    "figure_annotations": [
+        {"type": "label", "point": [520, 310], "text": "3", "color": "blue"},
+        {"type": "check", "point": [905, 640]}
+    ]
+}
+"""
+
 # 기본 우선순위 모델 목록 (실제 존재하는 최신 초고속 비전 플래그십 순서)
 BASE_MODEL_PRIORITY = [
     "gemini-2.5-flash",
@@ -141,6 +217,7 @@ def solve_problem_with_gemini(
     Gemini API를 호출하여 이미지 속 문제를 풀이합니다.
     API 키가 없거나 미등록 시 명확한 에러 안내를 반환합니다.
     solve_style: 'killer_tutor' (수능 1타 강사 실전 압축 풀이) | 'standard_concept' (친절한 개념 정석 풀이)
+                 | 'multi_method' | 'wrong_note' | 'hint_steps' | 'report' (EXTRA_STYLE_PRINCIPLES)
     """
     if "solve_style" in kwargs:
         solve_style = kwargs["solve_style"]
@@ -279,12 +356,15 @@ def solve_problem_with_gemini(
     ],
     "final_answer": "객관식이면 선택지 번호와 값 함께 (예: ① 1/8, ③ ㄱ, ㄷ), 주관식이면 값 (예: 16)",
     "tip": "실전 킬러 핵심 포인트 한 줄 (40자 이내)",
+    "key_concepts": ["이 문제에 쓰인 핵심 개념·공식 이름 1~4개 (각 15자 이내)"],
     "figure_annotations": [
         {"type": "label", "point": [520, 310], "text": "3", "color": "blue"},
         {"type": "check", "point": [905, 640]}
     ]
 }
 """
+        elif solve_style in EXTRA_STYLE_PRINCIPLES:
+            prompt = EXTRA_STYLE_PRINCIPLES[solve_style] + STANDARD_PROMPT_TAIL
         else:
             prompt = """
 당신은 친절하고 꼼꼼한 수학/과학/논리학 과외 선생님입니다.
@@ -319,6 +399,7 @@ def solve_problem_with_gemini(
     ],
     "final_answer": "객관식이면 선택지 번호와 값 함께 (예: ① 1/8, ③ ㄱ, ㄷ), 주관식이면 값 (예: 16)",
     "tip": "선생님의 한 줄 꿀팁 또는 자주 하는 실수 포인트 (40자 이내)",
+    "key_concepts": ["이 문제에 쓰인 핵심 개념·공식 이름 1~4개 (각 15자 이내)"],
     "figure_annotations": [
         {"type": "label", "point": [520, 310], "text": "3", "color": "blue"},
         {"type": "check", "point": [905, 640]}

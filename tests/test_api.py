@@ -40,8 +40,10 @@ def render(client, **overrides):
 
 def test_styles_catalog(client):
     body = client.get("/api/styles").json()
-    assert {m["id"] for m in body["solve_modes"]} == {"killer_tutor", "standard_concept"}
-    assert {l["id"] for l in body["layouts"]} == {"margin", "postit", "notebook"}
+    assert {m["id"] for m in body["solve_modes"]} == {
+        "killer_tutor", "standard_concept", "multi_method", "wrong_note", "hint_steps", "report"
+    }
+    assert {l["id"] for l in body["layouts"]} == {"margin", "postit", "notebook", "report", "cornell"}
     assert any(f["id"] == "NanumAmsterdam" for f in body["fonts"])
     assert all(p["color"].startswith("#") for p in body["pens"])
 

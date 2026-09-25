@@ -82,3 +82,26 @@ def test_model_discovery_skips_non_solver_models():
 ])
 def test_friendly_ai_error(detail, phrase):
     assert phrase in friendly_ai_error(detail)
+
+
+@pytest.mark.parametrize("mode", ["multi_method", "wrong_note", "hint_steps", "report"])
+def test_extra_modes_use_their_own_principles(monkeypatch, mode):
+    prompts = []
+    fake = FakeModels({"m": ["ok"]})
+    orig = fake.generate_content
+
+    def capture(model, contents, config=None):
+        prompts.append(contents[1])
+        return orig(model, contents, config)
+
+    fake.generate_content = capture
+    monkeypatch.setattr(gs.genai, "Client", lambda api_key: type("C", (), {"models": fake})())
+    monkeypatch.setenv("GEMINI_MODELS", "m")
+    result = gs.solve_problem_with_gemini(image_bytes=b"x", api_key="k", solve_style=mode)
+    assert result["final_answer"] == "① 1/8"
+    assert gs.EXTRA_STYLE_PRINCIPLES[mode] in prompts[0] and "key_concepts" in prompts[0]
+
+
+def test_every_catalog_mode_has_a_prompt():
+    from server.catalog import SOLVE_MODES
+    assert set(SOLVE_MODES) == {"killer_tutor", "standard_concept"} | set(gs.EXTRA_STYLE_PRINCIPLES)

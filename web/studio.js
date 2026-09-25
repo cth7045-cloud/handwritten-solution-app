@@ -45,6 +45,7 @@ const els = {
   resultImg: $("result-img"),
   rewriteBtn: $("rewrite-btn"),
   downloadBtn: $("download-btn"),
+  pdfBtn: $("pdf-btn"),
   solutionText: $("solution-text"),
   solutionBody: $("solution-body"),
 };
@@ -135,10 +136,11 @@ function onStyleChange(kind, id) {
   updateStyleSummary();
   const name = labels[kind][id] || id;
   const what = { font: "글씨체", pen: "펜", layout: "합성 방식", postit: "포스트잇 색" }[kind];
+  const extra = kind === "layout" && id === "report" ? " [PDF] 버튼으로 A4 그대로 저장할 수 있어요." : "";
   if (state.solution) {
-    scheduleRender(`✓ ${what} 변경: ${name} — 새 스타일로 다시 썼습니다.`);
+    scheduleRender(`✓ ${what} 변경: ${name} — 새 스타일로 다시 썼습니다.${extra}`);
   } else {
-    setStatus(`✓ ${what} 선택: ${name} — 해설을 만들면 이 스타일로 씁니다.`);
+    setStatus(`✓ ${what} 선택: ${name} — 해설을 만들면 이 스타일로 씁니다.${extra}`);
   }
 }
 
@@ -229,6 +231,7 @@ async function acceptImage(file) {
   setSourcePreview(URL.createObjectURL(state.image));
   els.generateBtn.disabled = false;
   els.rewriteBtn.disabled = true;
+  els.pdfBtn.disabled = true;
   setStatus("문제 이미지가 등록되었습니다.");
 }
 
@@ -314,10 +317,7 @@ function hideBusy() {
   els.resultBusy.hidden = true;
 }
 
-async function renderResult(doneMsg) {
-  if (!state.solution) return;
-  renderController?.abort();
-  renderController = new AbortController();
+function renderForm(fmt = "png") {
   const form = new FormData();
   if (state.solveId) {
     form.append("solve_id", String(state.solveId));
@@ -331,6 +331,15 @@ async function renderResult(doneMsg) {
   form.append("postit_color", state.postit);
   form.append("seed", String(state.seed));
   form.append("marks", state.marks ? "true" : "false");
+  form.append("fmt", fmt);
+  return form;
+}
+
+async function renderResult(doneMsg) {
+  if (!state.solution) return;
+  renderController?.abort();
+  renderController = new AbortController();
+  const form = renderForm();
 
   showBusy("✎ 다시 쓰는 중…");
   let aborted = false;
@@ -346,6 +355,7 @@ async function renderResult(doneMsg) {
     els.downloadBtn.classList.remove("disabled");
     els.downloadBtn.setAttribute("aria-disabled", "false");
     els.rewriteBtn.disabled = false;
+    els.pdfBtn.disabled = false;
     if (doneMsg) setStatus(doneMsg);
   } catch (err) {
     aborted = err.name === "AbortError";
@@ -353,6 +363,29 @@ async function renderResult(doneMsg) {
   } finally {
     // 더 새로운 요청이 진행 중이면 표시를 유지합니다
     if (!aborted) hideBusy();
+  }
+}
+
+// 지금 보이는 스타일 그대로 PDF(A4 레포트는 실제 A4 크기, 여러 장)로 저장합니다.
+async function downloadPdf() {
+  if (!state.solution) return;
+  els.pdfBtn.disabled = true;
+  setStatus("PDF를 만드는 중…");
+  try {
+    const res = await request("/api/render", { method: "POST", form: renderForm("pdf"), raw: true });
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "손글씨_해설노트.pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    setStatus("✓ PDF로 저장했습니다.");
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    els.pdfBtn.disabled = false;
   }
 }
 
@@ -456,6 +489,7 @@ export async function initStudio({ onUsageChange }) {
   bindImageInputs();
   els.generateBtn.addEventListener("click", generate);
   els.marksToggle.addEventListener("change", onMarksToggle);
+  els.pdfBtn.addEventListener("click", downloadPdf);
   els.rewriteBtn.addEventListener("click", () => {
     state.seed = newSeed();
     renderResult("✓ 같은 풀이를 새 필체로 다시 썼습니다.");
