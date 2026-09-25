@@ -83,7 +83,7 @@ uvicorn server.main:app --reload --port 8000
 
 ### 현재 운영 중인 배포 (Render + Supabase)
 - 주소: https://handwritten-note.onrender.com
-- 서버: Render 무료 플랜, 싱가포르 (`WEB_CONCURRENCY=1`, 무료 플랜 메모리 512MB에 맞춤). 15분간 접속이 없으면 잠들고, 다음 접속 때 깨어나는 데 약 1분 걸립니다.
+- 서버: Render 무료 플랜, 싱가포르 (`WEB_CONCURRENCY=1`, 무료 플랜 메모리 512MB에 맞춤). 무료 플랜은 15분간 접속이 없으면 잠드는데, Supabase의 예약 작업(`pg_cron` + `pg_net`, 작업 이름 `keep-render-awake`)이 10분마다 `/healthz`를 호출해 깨어 있게 합니다. `/healthz`는 DB도 한 번 조회하므로 Supabase 무료 프로젝트의 비활성 일시정지도 막습니다. (항상 켜 두면 한 달 약 720~744시간으로 Render 무료 750시간 안에 들어갑니다. 끄려면 Supabase SQL 편집기에서 `select cron.unschedule('keep-render-awake');`)
 - DB: Supabase(싱가포르) PostgreSQL. 앱 전용 계정 `hwapp`이 공개 API에 노출되지 않는 `app` 스키마만 사용합니다. 세션 풀러(IPv4) 주소로 접속합니다.
 - 배포 브랜치: `claude/ai-handwriting-solution-generator-5kyxsz`. 코드를 올린 뒤 Render 대시보드의 **Manual Deploy → Deploy latest commit**으로 다시 배포합니다. (Render 계정 설정에서 GitHub를 연결하면 push할 때마다 자동으로 배포됩니다.)
 - 환경변수(`GEMINI_API_KEY`, `ADMIN_PASSWORD`, `DATABASE_URL` 등)는 Render 대시보드 → 서비스 → Environment에서 관리합니다.
